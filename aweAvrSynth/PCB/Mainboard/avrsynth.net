@@ -1,0 +1,789 @@
+# EESchema Netlist Version 1.1 created  02.12.2011 19:47:29
+(
+ ( /4D83B803/4D8F8B6F C2 C1 330nF
+  ( 1 N-000019 )
+  ( 2 GND )
+ )
+ ( /4D83B803/4D8F8B77 C2 C2 100nF
+  ( 1 +5V )
+  ( 2 GND )
+ )
+ ( /4D83B803/4D8F8BF1 C1V5 C3 10uF/35V
+  ( 1 GND )
+  ( 2 +5V )
+ )
+ ( /4D83B803/4D78D445 C1 C4 100nF
+  ( 1 +5V )
+  ( 2 GND )
+ )
+ ( /4D83B803/4D78DA03 C1 C5 100nF
+  ( 1 GND )
+  ( 2 +5V )
+ )
+ ( /4D83B803/4D79BD4F C1 C6 33pF_KER
+  ( 1 N-000009 )
+  ( 2 GND )
+ )
+ ( /4D83B803/4D79BD55 C1 C7 33pF_KER
+  ( 1 N-000010 )
+  ( 2 GND )
+ )
+ ( /4D83B803/4D78D40F C1 C8 100nF
+  ( 1 +5V )
+  ( 2 GND )
+ )
+ ( /4D83B8C9/4D78D4E3 C1V5 C9 47uF/25V
+  ( 1 GND )
+  ( 2 N-000085 )
+ )
+ ( /4D83B8C9/4D78D4DA C2 C10 100nF
+  ( 1 GND )
+  ( 2 N-000085 )
+ )
+ ( /4D83B8C9/4D8B2E15 C1V5 C11 10uF/35V
+  ( 1 GND )
+  ( 2 N-000087 )
+ )
+ ( /4D83B8C9/4D830CB5 C1V5 C12 10uF/35V
+  ( 1 N-000080 )
+  ( 2 N-000075 )
+ )
+ ( /4D83B8C9/4D830C51 C1V5 C13 1uF/25V
+  ( 1 N-000073 )
+  ( 2 N-000081 )
+ )
+ ( /4D83B8C9/4D830A4A C2V8 C14 220uF/25V
+  ( 1 N-000070 )
+  ( 2 N-000083 )
+ )
+ ( /4D83B8C9/4D830DE1 C2 C15 10nF
+  ( 1 N-000078 )
+  ( 2 N-000079 )
+ )
+ ( /4D83B8C9/4D830D0D C2 C16 1nF
+  ( 1 N-000075 )
+  ( 2 N-000076 )
+ )
+ ( /4D83B8C9/4D8B2723 C2 C17 47nF
+  ( 1 N-000082 )
+  ( 2 N-000083 )
+ )
+ ( /4D83B8C9/4D830DE0 C2 C18 470pF_2,5%
+  ( 1 GND )
+  ( 2 N-000084 )
+ )
+ ( /4D83B8C9/4DF119B0 C2 C19 470pF_2,5%
+  ( 1 GND )
+  ( 2 N-000077 )
+ )
+ ( /4D83B8C9/4D907F9C C2 C20 100nF
+  ( 1 GND )
+  ( 2 +5V )
+ )
+ ( /4D83B8C9/4D830F7A C2 C21 100nF
+  ( 1 GND )
+  ( 2 +5V )
+ )
+ ( /4D83B8C9/4D830F79 C2V10 C22 470uF/25V
+  ( 1 GND )
+  ( 2 +5V )
+ )
+ ( /4D83B8C9/4D907F98 C1V5 C23 10uF/35V
+  ( 1 GND )
+  ( 2 +5V )
+ )
+ ( /4D83B89A/4D8483CD C1V5 C24 1uF/25V
+  ( 1 N-000035 )
+  ( 2 N-000041 )
+ )
+ ( /4D83B89A/4D8483D0 C1V5 C25 1uF/25V
+  ( 1 N-000038 )
+  ( 2 N-000036 )
+ )
+ ( /4D83B89A/4D848609 C1V5 C26 1uF/25V
+  ( 1 GND )
+  ( 2 +5V )
+ )
+ ( /4D83B89A/4D84839C C1V5 C27 1uF/25V
+  ( 1 +5V )
+  ( 2 N-000039 )
+ )
+ ( /4D83B89A/4D8483B3 C1V5 C28 1uF/25V
+  ( 1 N-000040 )
+  ( 2 GND )
+ )
+ ( /4D83B803/4D8F8907 DO41-4 D1 1N4001
+  ( 1 N-000008 )
+  ( 2 N-000019 )
+ )
+ ( /4D83B89A/4DCADC0A DO35-3 D2 BAT42
+  ( 1 /Controller/SERIAL_RXD )
+  ( 2 /Serial/RX )
+ )
+ ( /4D83B803/4D79BC2F DO35-3 D4 1N4148
+  ( 1 /Controller//RESET )
+  ( 2 +5V )
+ )
+ ( /4D83B89A/4D831F9A DO35-3 D9 1N4148
+  ( 1 N-000055 )
+  ( 2 N-000054 )
+ )
+ ( /4D83B803/4D8F8B04 TO92-123 IC1 LM78L05Z
+  ( 1 N-000007 )
+  ( 2 GND )
+  ( 3 N-000019 )
+ )
+ ( /4D83B803/4D7F3EFD DIP-40__600 IC2 ATMEGA32-P
+  ( 1 /Controller/SW_ROW0 )
+  ( 2 /Controller/SW_ROW1 )
+  ( 3 /Controller/SW_ROW2 )
+  ( 4 /Controller/SW_ROW3 )
+  ( 5 /Controller/SW_ROW4 )
+  ( 6 /Controller/MOSI )
+  ( 7 /Controller/MISO )
+  ( 8 /Controller/SCK )
+  ( 9 /Controller//RESET )
+  ( 10 +5V )
+  ( 11 GND )
+  ( 12 N-000009 )
+  ( 13 N-000010 )
+  ( 14 /Controller/SERIAL_RXD )
+  ( 15 /Controller/SERIAL_TXD )
+  ( 16 /Audio/DAC_WR )
+  ( 17 /Audio/DAC_AB )
+  ( 18 /Controller/SW_COL0 )
+  ( 19 /Controller/SW_COL1 )
+  ( 20 /Controller/SW_COL2 )
+  ( 21 /Controller/SW_COL3 )
+  ( 22 /Audio/DAC_DB0 )
+  ( 23 /Audio/DAC_DB1 )
+  ( 24 /Controller/DAC_DB2 )
+  ( 25 /Controller/DAC_DB3 )
+  ( 26 /Controller/DAC_DB4 )
+  ( 27 /Audio/DAC_DB5 )
+  ( 28 /Audio/DAC_DB6 )
+  ( 29 /Audio/DAC_DB7 )
+  ( 30 +5V )
+  ( 31 GND )
+  ( 32 +5V )
+  ( 33 /Controller/ADC7 )
+  ( 34 /Controller/ADC6 )
+  ( 35 /Controller/ADC5 )
+  ( 36 /Controller/ADC4 )
+  ( 37 /Controller/ADC3 )
+  ( 38 /Controller/ADC2 )
+  ( 39 /Controller/ADC1 )
+  ( 40 /Controller/ADC0 )
+ )
+ ( /4D83B89A/4D84812C DIP-16__300 IC3 MAX232
+  ( 1 N-000041 )
+  ( 2 N-000039 )
+  ( 3 N-000035 )
+  ( 4 N-000036 )
+  ( 5 N-000038 )
+  ( 6 N-000040 )
+  ( 7 /Serial/TXD )
+  ( 8 /Serial/RXD )
+  ( 9 /Serial/RX )
+  ( 10 /Controller/SERIAL_TXD )
+  ( 11 /Serial/RTS_OUT )
+  ( 12 /Serial/CTS_IN )
+  ( 13 /Serial/CTS )
+  ( 14 /Serial/RTS )
+  ( 15 GND )
+  ( 16 +5V )
+ )
+ ( /4D83B8C9/4D8B26FA DIP-8__300 IC4 LM386
+  ( 1 ? )
+  ( 2 GND )
+  ( 3 N-000081 )
+  ( 4 GND )
+  ( 5 N-000083 )
+  ( 6 +5V )
+  ( 7 N-000087 )
+  ( 8 ? )
+ )
+ ( /4D83B8C9/4D907E6E DIP-20__300 IC5 AD7302
+  ( 1 /Audio/DAC_DB7 )
+  ( 2 /Audio/DAC_DB6 )
+  ( 3 /Audio/DAC_DB5 )
+  ( 4 /Controller/DAC_DB4 )
+  ( 5 /Controller/DAC_DB3 )
+  ( 6 /Controller/DAC_DB2 )
+  ( 7 /Audio/DAC_DB1 )
+  ( 8 /Audio/DAC_DB0 )
+  ( 9 GND )
+  ( 10 /Audio/DAC_WR )
+  ( 11 /Audio/DAC_AB )
+  ( 12 +5V )
+  ( 13 GND )
+  ( 14 +5V )
+  ( 15 +5V )
+  ( 16 +5V )
+  ( 17 GND )
+  ( 18 N-000086 )
+  ( 19 N-000071 )
+  ( 20 GND )
+ )
+ ( /4D83B8C9/4D83091A DIP-8__300 IC6 MCP6002
+  ( 1 N-000078 )
+  ( 2 N-000078 )
+  ( 3 N-000084 )
+  ( 4 GND )
+  ( 5 N-000077 )
+  ( 6 N-000075 )
+  ( 7 N-000075 )
+  ( 8 N-000085 )
+ )
+ ( /4D83B89A/4DCADC09 pin_array_2x1 JP1 JUMPER
+  ( 1 /Serial/RTS_OUT )
+  ( 2 /Serial/CTS_IN )
+ )
+ ( /4D83B803/4D8F8BDC R5 L1 10uH
+  ( 1 N-000007 )
+  ( 2 +5V )
+ )
+ ( /4D83B89A/4D831F8C DIP-8__300 OK1 6N138
+  ( 2 N-000054 )
+  ( 3 N-000055 )
+  ( 5 GND )
+  ( 6 /Controller/SERIAL_RXD )
+  ( 7 N-000057 )
+  ( 8 +5V )
+ )
+ ( /4D83B803/4D8F330D PS25_10G P1 CONN_10
+  ( 1 +5V )
+  ( 2 /Controller/ADC7 )
+  ( 3 /Controller/ADC6 )
+  ( 4 /Controller/ADC5 )
+  ( 5 /Controller/ADC4 )
+  ( 6 /Controller/ADC3 )
+  ( 7 /Controller/ADC2 )
+  ( 8 /Controller/ADC1 )
+  ( 9 /Controller/ADC0 )
+  ( 10 GND )
+ )
+ ( /4D83B803/4D8F4323 PS25_5G P2 CONN_5
+  ( 1 /Controller/SW_ROW0 )
+  ( 2 /Controller/SW_ROW1 )
+  ( 3 /Controller/SW_ROW2 )
+  ( 4 /Controller/SW_ROW3 )
+  ( 5 /Controller/SW_ROW4 )
+ )
+ ( /4D83B803/4D78ED1A pin_array_3x2 P3 CONN_3X2
+  ( 1 /Controller/MISO )
+  ( 2 +5V )
+  ( 3 /Controller/SCK )
+  ( 4 /Controller/MOSI )
+  ( 5 /Controller//RESET )
+  ( 6 GND )
+ )
+ ( /4D83B8C9/4DE94382 PS25_8G P4 CONN_8
+  ( 1 N-000080 )
+  ( 2 N-000073 )
+  ( 3 GND )
+  ( 4 N-000072 )
+  ( 5 N-000074 )
+  ( 6 GND )
+  ( 7 N-000070 )
+  ( 8 GND )
+ )
+ ( /4D83B803/4D8F4340 PS25_5G P6 CONN_5
+  ( 1 /Controller/SW_COL0 )
+  ( 2 /Controller/SW_COL1 )
+  ( 3 /Controller/SW_COL2 )
+  ( 4 /Controller/SW_COL3 )
+  ( 5 ? )
+ )
+ ( /4D83B89A/4D8323CE PS25_3G P9 CONN_3
+  ( 1 N-000068 )
+  ( 2 GND )
+  ( 3 N-000061 )
+ )
+ ( /4D83B89A/4D832575 PS25_3G P10 CONN_3
+  ( 1 N-000060 )
+  ( 2 GND )
+  ( 3 N-000062 )
+ )
+ ( /4D83B89A/4D8325A3 PS25_3G P11 CONN_3
+  ( 1 N-000055 )
+  ( 2 ? )
+  ( 3 N-000056 )
+ )
+ ( /4D83B89A/4D8A30C7 pin_array_5x2 P12 CONN_5X2
+  ( 1 ? )
+  ( 2 ? )
+  ( 3 /Serial/TXD )
+  ( 4 /Serial/CTS )
+  ( 5 /Serial/RXD )
+  ( 6 /Serial/RTS )
+  ( 7 ? )
+  ( 8 ? )
+  ( 9 GND )
+  ( 10 ? )
+ )
+ ( /4D83B803/4D902269 PS25_3G P14 CONN_3
+  ( 1 N-000007 )
+  ( 2 N-000008 )
+  ( 3 GND )
+ )
+ ( /4D83B803/4D92D0B8 PS25_3G P16 CONN_3
+  ( 1 N-000006 )
+  ( 2 /Controller//RESET )
+  ( 3 GND )
+ )
+ ( /4D83B89A/4D8320D7 TO92 Q5 BC557B
+  ( B N-000069 )
+  ( C N-000058 )
+  ( E +5V )
+ )
+ ( /4D83B89A/4D8320CE TO92 Q6 BC547C
+  ( B N-000059 )
+  ( C N-000053 )
+  ( E GND )
+ )
+ ( /4D83B89A/4D832273 TO92 Q7 BC557B
+  ( B N-000064 )
+  ( C N-000065 )
+  ( E +5V )
+ )
+ ( /4D83B89A/4D832274 TO92 Q8 BC547C
+  ( B N-000066 )
+  ( C N-000067 )
+  ( E GND )
+ )
+ ( /4D83B803/4D8F2A88 R4 R1 10K
+  ( 1 +5V )
+  ( 2 /Controller//RESET )
+ )
+ ( /4D83B8C9/4D90824E R4 R2 1K_0,1%
+  ( 1 N-000086 )
+  ( 2 N-000079 )
+ )
+ ( /4D83B803/4D92D0FC R4 R3 220R
+  ( 1 N-000006 )
+  ( 2 /Controller/MISO )
+ )
+ ( /4D83B8C9/4D99B5E2 R4 R4 270K_0,1%
+  ( 1 N-000079 )
+  ( 2 N-000071 )
+ )
+ ( /4D83B8C9/4D830DE3 R4 R11 10K_0,1%
+  ( 1 N-000079 )
+  ( 2 N-000084 )
+ )
+ ( /4D83B8C9/4D830D07 R4 R13 4K7_1%
+  ( 1 N-000078 )
+  ( 2 N-000076 )
+ )
+ ( /4D83B8C9/4D830CFA R4 R14 24K_1%
+  ( 1 N-000076 )
+  ( 2 N-000077 )
+ )
+ ( /4D83B8C9/4D8309AF R4 R16 10R
+  ( 1 N-000082 )
+  ( 2 GND )
+ )
+ ( /4D83B8C9/4D830F19 R4 R21 22R
+  ( 1 N-000085 )
+  ( 2 +5V )
+ )
+ ( /4D83B8C9/4D83135A R4 R23 10K
+  ( 1 GND )
+  ( 2 N-000081 )
+ )
+ ( /4D83B8C9/4D83143B R4 R24 470R
+  ( 1 N-000074 )
+  ( 2 N-000080 )
+ )
+ ( /4D83B8C9/4D83143E R4 R25 470R
+  ( 1 N-000072 )
+  ( 2 N-000080 )
+ )
+ ( /4D83B89A/4D8320AE R4 R26 220R
+  ( 1 N-000062 )
+  ( 2 +5V )
+ )
+ ( /4D83B89A/4D8320C1 R4 R27 220R
+  ( 1 +5V )
+  ( 2 N-000069 )
+ )
+ ( /4D83B89A/4D8320B0 R4 R28 220R
+  ( 1 N-000060 )
+  ( 2 N-000053 )
+ )
+ ( /4D83B89A/4D8320B3 R4 R29 4K7
+  ( 1 N-000059 )
+  ( 2 N-000058 )
+ )
+ ( /4D83B89A/4D8320BB R4 R30 1K5
+  ( 1 N-000069 )
+  ( 2 /Controller/SERIAL_RXD )
+ )
+ ( /4D83B89A/4D8320B7 R4 R31 33K
+  ( 1 N-000058 )
+  ( 2 GND )
+ )
+ ( /4D83B89A/4D831FDD R4 R32 220R
+  ( 1 +5V )
+  ( 2 /Controller/SERIAL_RXD )
+ )
+ ( /4D83B89A/4D831FA1 R4 R33 220R
+  ( 1 N-000056 )
+  ( 2 N-000054 )
+ )
+ ( /4D83B89A/4D832033 R4 R34 15K
+  ( 1 N-000057 )
+  ( 2 GND )
+ )
+ ( /4D83B89A/4D83227A R4 R35 220R
+  ( 1 N-000061 )
+  ( 2 +5V )
+ )
+ ( /4D83B89A/4D832275 R4 R36 220R
+  ( 1 +5V )
+  ( 2 N-000064 )
+ )
+ ( /4D83B89A/4D832279 R4 R37 220R
+  ( 1 N-000068 )
+  ( 2 N-000067 )
+ )
+ ( /4D83B89A/4D832278 R4 R38 4K7
+  ( 1 N-000066 )
+  ( 2 N-000065 )
+ )
+ ( /4D83B89A/4D832276 R4 R39 1K5
+  ( 1 N-000064 )
+  ( 2 /Controller/SERIAL_TXD )
+ )
+ ( /4D83B89A/4D832277 R4 R40 33K
+  ( 1 N-000065 )
+  ( 2 GND )
+ )
+ ( /4D83B89A/4D8B0BC0 R4 R45 10K
+  ( 1 +5V )
+  ( 2 /Serial/RTS_OUT )
+ )
+ ( /4D83B89A/4D8B0B37 R4 R46 10K
+  ( 1 +5V )
+  ( 2 /Controller/SERIAL_TXD )
+ )
+ ( /4D83B803/4D79E854 HC-49V X1 16MHz
+  ( 1 N-000009 )
+  ( 2 N-000010 )
+ )
+ ( /4E140B50 HOLE_32 _NP1 HOLE
+  ( 1 GND )
+ )
+ ( /4E140B4F HOLE_32 _NP2 HOLE
+  ( 1 GND )
+ )
+ ( /4E140B4E HOLE_32 _NP3 HOLE
+  ( 1 GND )
+ )
+ ( /4E140B4D HOLE_32 _NP4 HOLE
+  ( 1 GND )
+ )
+)
+*
+{ Allowed footprints by component:
+$component C1
+ SM*
+ C?
+ C1-1
+$endlist
+$component C2
+ SM*
+ C?
+ C1-1
+$endlist
+$component C4
+ SM*
+ C?
+ C1-1
+$endlist
+$component C5
+ SM*
+ C?
+ C1-1
+$endlist
+$component C6
+ SM*
+ C?
+ C1-1
+$endlist
+$component C7
+ SM*
+ C?
+ C1-1
+$endlist
+$component C8
+ SM*
+ C?
+ C1-1
+$endlist
+$component C10
+ SM*
+ C?
+ C1-1
+$endlist
+$component C15
+ SM*
+ C?
+ C1-1
+$endlist
+$component C16
+ SM*
+ C?
+ C1-1
+$endlist
+$component C17
+ SM*
+ C?
+ C1-1
+$endlist
+$component C18
+ SM*
+ C?
+ C1-1
+$endlist
+$component C19
+ SM*
+ C?
+ C1-1
+$endlist
+$component C20
+ SM*
+ C?
+ C1-1
+$endlist
+$component C21
+ SM*
+ C?
+ C1-1
+$endlist
+$component D1
+ D?
+ S*
+$endlist
+$component D2
+ D?
+ S*
+$endlist
+$component D4
+ D?
+ S*
+$endlist
+$component D9
+ D?
+ S*
+$endlist
+$component IC2
+ 40DIP-ELL600
+ 40dip600
+$endlist
+$component R1
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R2
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R3
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R4
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R11
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R13
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R14
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R16
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R21
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R23
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R24
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R25
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R26
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R27
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R28
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R29
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R30
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R31
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R32
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R33
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R34
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R35
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R36
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R37
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R38
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R39
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R40
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R45
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$component R46
+ R?
+ SM0603
+ SM0805
+ R?-*
+ SM1206
+$endlist
+$endfootprintlist
+}

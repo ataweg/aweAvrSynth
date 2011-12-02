@@ -1,0 +1,129 @@
+EESchema Schematic File Version 2  date 02.12.2011 19:52:34
+LIBS:aweComponents
+LIBS:aweDevice
+LIBS:aweSynthComp
+LIBS:aweOpAmps
+LIBS:aweConnectors
+LIBS:7Segment
+LIBS:Reichelt
+LIBS:Umschalter
+LIBS:power
+LIBS:avrsynth-cache
+EELAYER 25  0
+EELAYER END
+$Descr A4 11700 8267
+encoding utf-8
+Sheet 1 4
+Title "avrsynth"
+Date "1 dec 2011"
+Rev "Rev B"
+Comp "Axel Werner"
+Comment1 ""
+Comment2 ""
+Comment3 ""
+Comment4 ""
+$EndDescr
+$Comp
+L HOLE _NP1
+U 1 1 4E140B50
+P 9700 1500
+F 0 "_NP1" H 9900 1450 60  0000 C CNN
+F 1 "HOLE" H 9900 1550 60  0000 C CNN
+F 2 "HOLE_32" H 9700 1500 60  0001 C CNN
+	1    9700 1500
+	1    0    0    -1  
+$EndComp
+$Comp
+L HOLE _NP2
+U 1 1 4E140B4F
+P 9700 1950
+F 0 "_NP2" H 9900 1900 60  0000 C CNN
+F 1 "HOLE" H 9900 2000 60  0000 C CNN
+F 2 "HOLE_32" H 9700 1950 60  0001 C CNN
+	1    9700 1950
+	1    0    0    -1  
+$EndComp
+$Comp
+L HOLE _NP3
+U 1 1 4E140B4E
+P 10400 1500
+F 0 "_NP3" H 10600 1450 60  0000 C CNN
+F 1 "HOLE" H 10600 1550 60  0000 C CNN
+F 2 "HOLE_32" H 10400 1500 60  0001 C CNN
+	1    10400 1500
+	1    0    0    -1  
+$EndComp
+$Comp
+L HOLE _NP4
+U 1 1 4E140B4D
+P 10400 1950
+F 0 "_NP4" H 10600 1900 60  0000 C CNN
+F 1 "HOLE" H 10600 2000 60  0000 C CNN
+F 2 "HOLE_32" H 10400 1950 60  0001 C CNN
+	1    10400 1950
+	1    0    0    -1  
+$EndComp
+$Comp
+L GND #PWR01
+U 1 1 4E140B4C
+P 10100 2250
+F 0 "#PWR01" H 10100 2250 30  0001 C CNN
+F 1 "GND" H 10100 2180 30  0001 C CNN
+	1    10100 2250
+	-1   0    0    -1  
+$EndComp
+Connection ~ 10100 2150
+Wire Wire Line
+	10400 1600 10400 1700
+Wire Wire Line
+	10400 1700 9700 1700
+Wire Wire Line
+	9700 1700 9700 1600
+Wire Wire Line
+	9700 2050 9700 2150
+Wire Wire Line
+	9700 2150 10400 2150
+Wire Wire Line
+	10400 2150 10400 2050
+Wire Wire Line
+	10100 1700 10100 2250
+Connection ~ 10100 1700
+$Sheet
+S 7050 3150 1250 800 
+U 4D83B89A
+F0 "Serial" 60
+F1 "avrsynth_Serial.sch" 60
+F2 "SERIAL_RXD" O L 7050 3650 60 
+F3 "SERIAL_TXD" I L 7050 3800 60 
+$EndSheet
+Wire Bus Line
+	5000 4900 7050 4900
+Wire Wire Line
+	5000 3800 7050 3800
+Wire Wire Line
+	7050 3650 5000 3650
+Wire Wire Line
+	5000 5050 7050 5050
+Wire Wire Line
+	5000 5150 7050 5150
+$Sheet
+S 7050 4650 1550 800 
+U 4D83B8C9
+F0 "Audio" 60
+F1 "avrsynth_Audio.sch" 60
+F2 "DAC_AB" I L 7050 5150 60 
+F3 "DAC_WR" I L 7050 5050 60 
+F4 "DAC_DB[0..7]" I L 7050 4900 60 
+$EndSheet
+$Sheet
+S 3300 2000 1700 3650
+U 4D83B803
+F0 "Controller" 60
+F1 "avrsynth_Controller.sch" 60
+F2 "SERIAL_TXD" O R 5000 3800 60 
+F3 "SERIAL_RXD" I R 5000 3650 60 
+F4 "DAC_DB[0..7]" O R 5000 4900 60 
+F5 "DAC_WR" O R 5000 5050 60 
+F6 "DAC_AB" O R 5000 5150 60 
+$EndSheet
+$EndSCHEMATC
