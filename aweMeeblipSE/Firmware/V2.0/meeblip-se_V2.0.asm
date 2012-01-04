@@ -6,6 +6,12 @@
 ; requires asm2 assembler, asm leads to some undefined variable errors
 ;
 ; Changelog
+; 2012.01.04	AWe	use better rounding for calculated table TAB_VCF
+;			move calculation of scaled_resonance from isr to mainloop
+;			change q offset from 32 to 24, lower values will cause clipping
+;			change index of some midi cc
+;			change bit SW_MIX_RING position of in variable PATCH_SWITCH3
+;			for extended button functions let LED blink faster
 ; 2011.12.22	AWe	bugfix: using of option USE_INIT_ENV_GENERATORS can cause hearable clicks, so don't use it
 ;			bugfix: correct routine mul32x16 with hw multiplier and in  volume control function
 ;			bugfix: use mulsu for LFO modulation and keybard tracking
@@ -202,6 +208,8 @@
 	.equ	USE_ORIGINAL_BANDLIMITED_PWM 	= 0	; 0: requires only one sawtooth table set
 	.equ	USE_ORIGINAL_DCO_FM		= 1
 	.equ	USE_ORIGINAL_RAW_OSC		= 1
+	.equ	USE_ORIGINAL_Q_CALC		= 1
+	.equ	Q_OFFSET			= 24
 	.equ	USE_ORIGINAL_RESONANCE_LIMIT	= 0	; 0: remove ranger limitation from v2.02
 	.equ	USE_ORIGINAL_PWM_LIMIT		= 0	; 0: allow duty cycle near 50%
 	.equ	USE_ORIGINAL_MIXER_LEVEL	= 1	; 0: will cause signal overflow
@@ -251,6 +259,8 @@
 	.equ	USE_ORIGINAL_BANDLIMITED_PWM 	= 1	; 0: requires only one sawtooth table set
 	.equ	USE_ORIGINAL_DCO_FM		= 1
 	.equ	USE_ORIGINAL_RAW_OSC		= 1
+	.equ	USE_ORIGINAL_Q_CALC		= 1
+	.equ	Q_OFFSET			= 32
 	.equ	USE_ORIGINAL_RESONANCE_LIMIT	= 1	; 0: remove ranger limitation from v2.02
 	.equ	USE_ORIGINAL_PWM_LIMIT		= 1	; 0: allow duty cycle near 50%
 	.equ	USE_ORIGINAL_MIXER_LEVEL	= 1	; 0: will cause signal overflow
@@ -302,6 +312,8 @@
 	.equ	USE_ORIGINAL_BANDLIMITED_PWM 	= 0	; 0: requires only one sawtooth table set
 	.equ	USE_ORIGINAL_DCO_FM		= 0                                                           	; 0: use switch for transponse
 	.equ	USE_ORIGINAL_RAW_OSC		= 0	; 0: use switch for Ringmodulator enable, set SW_ANTI_ALIAS to 1
+	.equ	USE_ORIGINAL_Q_CALC		= 0
+	.equ	Q_OFFSET			= 24
 	.equ	USE_ORIGINAL_RESONANCE_LIMIT	= 0	; 0: knob value is limited to 94% ($F6)
 	.equ	USE_ORIGINAL_PWM_LIMIT		= 0	; 0. duty cycle 1.5%..42,7% (4..109), 1: 1.5%..50% (4..127)
 	.equ	USE_ORIGINAL_MIXER_LEVEL	= 1	; 0: 6 db more output level, 1: (recommended)
@@ -365,32 +377,60 @@
 ;-----------------------------------------------------------------------------
 ;registers:
 
+			; r0		; multiplierer result regsiter
+			; r1		; dto.
+
 ;current phase of DCO A:
-	.DEF PHASEA_0	= r2
-	.DEF PHASEA_1	= r3
-	.DEF PHASEA_2	= r4
+	.DEF PHASEA_0	= r2		; used in timer0 ISR, not saved on stack
+	.DEF PHASEA_1	= r3		; dto.
+	.DEF PHASEA_2	= r4		; dto.
 
 ;current phase of DCO B:
-	.DEF PHASEB_0	= r5
-	.DEF PHASEB_1	= r6
-	.DEF PHASEB_2	= r7
-
-	.DEF ZERO	= r8
+	.DEF PHASEB_0	= r5		; dto.
+	.DEF PHASEB_1	= r6		; dto.
+	.DEF PHASEB_2	= r7		; dto.
+.if MEEBLIP_SE_ORIGINAL_CODE
+	.DEF ZERO	= r8		; dto.
 
 ;DCF:
-	.def a_L	= r9
-	.def a_H	= r10
+	.def a_L	= r9		; used in timer0 ISR, not saved on stack
+	.def a_H	= r10		; also used in sate variable filter, keeps lowpass.
 	.def temp_SREG	= r11
-	.def z_L	= r18
-	.def z_H	= r19
-	.def temp	= r30
-	.def temp2	= r31
+.else	; MEEBLIP_SE_ORIGINAL_CODE
+
+;DCF:
+	.def a_L	= r8		; used in timer0 ISR, not saved on stack
+	.def a_H	= r9		; also used in sate variable filter, keeps lowpass.
+	.DEF ZERO	= r10		; dto.
+	.def temp_SREG	= r11
+
+.endif	; MEEBLIP_SE_ORIGINAL_CODE
+			; r12		; used in state variable filter, keeps bandpass
+			; r13		; so used in timer0 ISR, not saved on stack
 
 	.DEF OSC_OUT_L	= r14		; pre-filter audio
-	.DEF OSC_OUT_H	= r15
+	.DEF OSC_OUT_H	= r15		; temporary used in ISR, not saved on stack
 
-	.def LDAC	= r16
-	.def HDAC	= r17
+	.def LDAC	= r16		; general purpose, used in ISR, saved on stack
+	.def HDAC	= r17		; dto
+
+	.def z_L	= r18		; temporary used in ISR, saved on stack
+	.def z_H	= r19		; dto.
+
+			; r20		; general purpose, used in ISR, saved on stack
+			; r21		; dto.
+			; r22		; dto.
+			; r23		; dto.
+			; r24		; dto.
+			; r25		; general purpose
+			; r26		; general purpose
+			; r27		; general purpose
+			; r28		; general purpose
+			; r29		; general purpose
+
+	.def temp	= r30		; general purpose, used in ISR, saved on stack
+	.def temp2	= r31		; dto
+
 
 ;RAM (0060h...025Fh):
 
@@ -446,9 +486,9 @@ PATCH_SWITCH2:		.BYTE 1
 
 .if USE_MORE_SWITCHES
 PATCH_SWITCH3:		.BYTE 1
-	.equ SW_MIX_RING		= 0	; 0=Mixer(default), 1=Ringmodulator
+	.equ SW_USER_3_0		= 0	;
 	.equ SW_USER_3_1		= 1	;
-	.equ SW_USER_3_2		= 2	;
+	.equ SW_MIX_RING		= 2	; 0=Mixer(default), 1=Ringmodulator
 	.equ SW_TRANSPOSE		= 3	; 0=down, 1=up (default)
 	.equ SW_DCA_MODE		= 4	; 0=gate, 1=env (default)
 	.equ SW_MODWHEEL_ENABLE		= 5	; 0=diable, 1=enable (default)
@@ -638,11 +678,11 @@ MIDICC:	.byte $80
 
 .if USE_EXTENDED_MIDI_CONTROL
 	.equ PWMDEPTH		= MIDICC + $0E	; Knob 1	14 ; (=LFO2LEVEL)
-	.equ LFO2FREQ		= MIDICC + $0F	; Knob 2	15 ; currently not used
-	.equ FMDEPTH		= MIDICC + $10	; Knob 3	16 ; currently not used
-;	.equ			= MIDICC + $11	; Knob 4	17
-;	.equ			= MIDICC + $12	; Knob 5	18
-;	.equ			= MIDICC + $13	; Knob 6	19
+	.equ MIDI_KNOB_2	= MIDICC + $0F	; Knob 2	15
+	.equ MIDI_KNOB_3	= MIDICC + $10	; Knob 3	16
+	.equ MIDI_KNOB_4	= MIDICC + $11	; Knob 4	17
+	.equ LFO2FREQ		= MIDICC + $12	; Knob 5	18 ; currently not used
+	.equ FMDEPTH		= MIDICC + $13	; Knob 6	19 ; currently not used
 	.equ MIXER_BALANCE	= MIDICC + $14	; Knob 7	20
 	.equ MASTER_VOLUME	= MIDICC + $15	; Knob 8	21
 
@@ -860,9 +900,9 @@ MASTER_VOLUME:			.byte 1
 			;	SW_PWM_SWEEP	= 6	; 0=off, 1=LFO2
 			;	SW_OSCA_WAVE	= 7 x	; 0=saw, 1=squ
 	.db	0xF8	; SW3 -> PATCH_SWITCH3	; $22 -> $2E
-			;	SW_MIX_RING	= 0	; 0=Mixer(default), 1=Ringmodulator
+			;	SW_USER_3_0	= 0	;
 			;	SW_USER_3_1	= 1	;
-			;	SW_USER_3_2	= 2	;
+			;	SW_MIX_RING	= 2	; 0=Mixer(default), 1=Ringmodulator
 			;	SW_TRANSPOSE	= 3 x	; 0=down, 1=up (default)
 			;	SW_DCA_MODE	= 4 x	; 0=gate, 1=env (default)
 			;	SW_MODWHEEL_ENA	= 5 x	; 0=diable, 1=enable (default)
@@ -940,9 +980,9 @@ MASTER_VOLUME:			.byte 1
 			;	SW_PWM_SWEEP	= 6	; 0=off, 1=LFO2
 			;	SW_OSCA_WAVE	= 7 x	; 0=saw, 1=squ
 	.db	0xF8	; SW3 -> PATCH_SWITCH3	; $22 -> $2E
-			;	SW_MIX_RING	= 0	; 0=Mixer(default), 1=Ringmodulator
+			;	SW_USER_3_0	= 0 	;
 			;	SW_USER_3_1	= 1 	;
-			;	SW_USER_3_2	= 2 	;
+			;	SW_MIX_RING	= 2	; 0=Mixer(default), 1=Ringmodulator
 			;	SW_TRANSPOSE	= 3 x	; 0=down, 1=up (default)
 			;	SW_DCA_MODE	= 4 x	; 0=gate, 1=env (default)
 			;	SW_MODWHEEL_ENA	= 5 x	; 0=diable, 1=enable (default)
@@ -1201,25 +1241,27 @@ TAB_VCF:
 	.DW	0xE8E0
 	.DW	0xFFF4
 .else	; USE_ORIGINAL_TAB_VCF
+
+; caluclated filter coeff, very similar to original values
 ; value = (16th root of 2)**(index+1)
-;
+
 TAB_VCF:
 	.db	  1,   1,   1,   1,   1,   1,   1,   1		;   0
-	.db	  1,   1,   1,   1,   1,   1,   1,   2		;   8
-	.db	  2,   2,   2,   2,   2,   2,   2,   2		;  16
-	.db	  2,   3,   3,   3,   3,   3,   3,   3		;  24
-	.db	  4,   4,   4,   4,   4,   5,   5,   5		;  32
-	.db	  5,   6,   6,   6,   7,   7,   7,   7		;  40
-	.db	  8,   8,   9,   9,   9,  10,  10,  11		;  48
-	.db	 11,  12,  12,  13,  14,  14,  15,  16		;  56
-	.db	 16,  17,  18,  19,  19,  20,  21,  22		;  64
-	.db	 23,  24,  25,  26,  28,  29,  30,  31		;  72
-	.db	 33,  34,  36,  38,  39,  41,  43,  45		;  80
-	.db	 47,  49,  51,  53,  56,  58,  61,  63		;  88
-	.db	 66,  69,  72,  76,  79,  82,  86,  90		;  96
-	.db	 94,  98, 103, 107, 112, 117, 122, 127		; 104
-	.db	133, 139, 145, 152, 158, 165, 173, 181		; 112
-	.db	189, 197, 206, 215, 224, 234, 245, 255		; 120
+	.db	  1,   2,   2,   2,   2,   2,   2,   2		;   8
+	.db	  2,   2,   2,   2,   2,   3,   3,   3		;  16
+	.db	  3,   3,   3,   3,   4,   4,   4,   4		;  24
+	.db	  4,   4,   5,   5,   5,   5,   5,   6		;  32
+	.db	  6,   6,   6,   7,   7,   7,   8,   8		;  40
+	.db	  8,   9,   9,  10,  10,  10,  11,  11		;  48
+	.db	 12,  12,  13,  13,  14,  15,  15,  16		;  56
+	.db	 17,  17,  18,  19,  20,  21,  22,  23		;  64
+	.db	 24,  25,  26,  27,  28,  29,  31,  32		;  72
+	.db	 33,  35,  36,  38,  40,  41,  43,  45		;  80
+	.db	 47,  49,  52,  54,  56,  59,  61,  64		;  88
+	.db	 67,  70,  73,  76,  79,  83,  87,  91		;  96
+	.db	 95,  99, 103, 108, 112, 117, 123, 128		; 104
+	.db	134, 140, 146, 152, 159, 166, 173, 181		; 112
+	.db	189, 197, 206, 215, 225, 235, 245, 255		; 120
 .endif	; USE_ORIGINAL_TAB_VCF
 
 ;-----------------------------------------------------------------------------
@@ -2090,12 +2132,15 @@ MIXER_END:
 ;
 ; A 2-pole resonant low pass filter:
 ;
-; a += f * ((in - a) + q * (a - b));
-; b += f * (a - b);
+; a += F * ((in - a) + q * 4 * (a - b));
+; b += F * (a - b);
 ;
-; f = LPF (cutoff)
-; q = RESONANCE
+; F = LPF (cutoff)
+; Q = RESONANCE
 ; b => output
+;
+; f = (1-F)/2+32
+; q = Q-f = Q-(1-F)/2+32
 ;
 ; Input 16-Bit signed HDAC:LDAC (r17:r16), already scaled to minimize clipping (reduced to 25% of full code).
 ;
@@ -2118,7 +2163,7 @@ OVERFLOW_1:				;when overflow is clear
 
 					;(in-a) is now in HDAC:LDAC as signed
 					;now calc q*(a-b)
-
+.if USE_ORIGINAL_Q_CALC
 					; Scale resonance based on filter cutoff
 	lds	r22, RESONANCE
 	lds	r20, LPF_I		;load 'F' value
@@ -2126,14 +2171,17 @@ OVERFLOW_1:				;when overflow is clear
 
 	sub	r21, r20		; 1-F
 	lsr	r21
-	ldi	r18, 32
-	add	r21, r18
+	ldi	r18, Q_OFFSET
+	add	r21, r18		; f = (1-F)/2+32
 
-	sub	r22, r21		; Q-(1-f)
+	sub	r22, r21		; q = Q-f = Q-(1-F/2)+32 = Q+F/2+32-1/2
 	brcc	OVERFLOW_2		; if no overflow occured
 	ldi	r22, 0x00		;0x00 because of unsigned
 
 OVERFLOW_2:
+.else	; USE_ORIGINAL_Q_CALC
+	lds	r22, SCALED_RESONANCE	;load filter Q value, unsigned
+.endif	; USE_ORIGINAL_Q_CALC
 
 	mov	r20, a_L		;\
 	mov	r21, a_H		;/ load 'a' , signed
@@ -2161,7 +2209,7 @@ OVERFLOW_3:
 	rjmp	DCF_ADD			; Skip lowpass calc
 
 CALC_LOWPASS:
-					; mul signed:unsigned -> (a-b) * Q
+					; mul signed:unsigned -> (a-b) * q
 					; 16x8 into 16-bit
 					; r19:r18 = r21:r20 (ah:al) * r22 (b)
 
@@ -2174,19 +2222,18 @@ CALC_LOWPASS:
 	brcc	NO_ROUND		; LSByte < $80, so don't round up
 	inc	r18
 NO_ROUND:
-	clc
+	clc				; (a-b) * q * 4
 	lsl	r18
 	rol	r19
 	clc
 	lsl	r18
 	rol	r19
-	movw	z_L,r18			;Q*(a-b) in z_H:z_L as signed
+	movw	z_L,r18			;q*(a-b) in z_H:z_L as signed
 
 					;add both
 					;both signed
 					;((in-a)+q*(a-b))
 					;=> HDAC:LDAC + z_H:z_L
-
  DCF_ADD:
 
 	add	LDAC, z_L
@@ -2270,8 +2317,6 @@ OVERFLOW_6:
 	lds	r18, PATCH_SWITCH1
 	sbrc	r18, SW_FILTER_MODE	; Check LP/HP switch.
 	lds	r20, HPF_I		; Switch set to HP, so load 'F' for HP
-
-;	mulsu	z_H, r20		;mul signed unsigned (a-b) * F
 
 					; mul signed unsigned (a-b) * F
 					; 16x8 into 16-bit
@@ -2897,7 +2942,7 @@ INTRX_SWITCH3:
 
 	cpi	r17, 0
 	brne	INTRX_SW31
-	bld	r26, SW_MIX_RING	; Set bit in PATCH_SWITCH3
+	bld	r26, SW_USER_3_0	; Set bit in PATCH_SWITCH3
 	rjmp	INTRX_SW3EXIT
 INTRX_SW31:
 	cpi	r17, 1
@@ -2907,7 +2952,7 @@ INTRX_SW31:
 INTRX_SW32:
 	cpi	r17, 2
 	brne	INTRX_SW33
-	bld	r26, SW_USER_3_2	; Set bit in PATCH_SWITCH3
+	bld	r26, SW_MIX_RING	; Set bit in PATCH_SWITCH3
 	rjmp	INTRX_SW3EXIT
 INTRX_SW33:
 	cpi	r17, 3
@@ -3827,8 +3872,8 @@ RESET:
 	clr	PHASEB_1
 	clr	PHASEB_2
 
-	clr	a_L			; clear DCF registers
-	clr	a_H			;
+	clr	a_L			; clear DCF registers	(lp_L)
+	clr	a_H			;			(lp_H)
 	clr	z_L			;
 	clr	z_H			;
 	clr	temp			;
@@ -4239,7 +4284,13 @@ MLP_SCAN:
 	breq	CONTROL_EXIT		; Set button status: 1=MIDI, 2=SAVE, 4=LOAD
 .if USE_EXTEDEND_BUTTON_FUNCTIONS
 	lds	r17, BUTTON_STATUS
+	tst	r17
+	breq	MLP_ONEBTN
+	cp	r16, r17
+	breq	MLP_ONEBTN
+	ori	r16, 0x80		; set bit 7 to indicate we have more then one button pressed
 	or	r16, r17
+MLP_ONEBTN:
 .endif	; USE_EXTEDEND_BUTTON_FUNCTIONS
 	sts	BUTTON_STATUS, r16	; Set control status to MIDI, turn on control timer
 	ldi	r16, 63
@@ -4250,8 +4301,17 @@ CONTROL_EXIT:
 	breq	MLP_LED_END		; button hasn't been pressed, so skip
 
 	; flip panel LED state until button timer is finished
+.if !USE_EXTEDEND_BUTTON_FUNCTIONS
 	lds	r16, LED_STATUS
+	ldi	r17, 32
+.else	; !USE_EXTEDEND_BUTTON_FUNCTIONS
 	ldi	r17, 64
+	andi	r16, 0x80
+	breq	MLP_SLOW_LED
+	ldi	r17, 128
+MLP_SLOW_LED:
+	lds	r16, LED_STATUS
+.endif	; !USE_EXTEDEND_BUTTON_FUNCTIONS
 	add	r16, r17
 	cpi	r16, $80
 	brlo	MLP_LED_OFF
@@ -4702,6 +4762,7 @@ MLP_SW_EXIT:
 	breq	MLP_SAVE
 
 .if USE_EXTEDEND_BUTTON_FUNCTIONS
+	andi	r17, 0x7f		; mask out flag for more then one button pressed
 	cpi	r17, (1<<SAVE_BUTTON) | (1<<MIDI_BUTTON)	; extended function set 1
 	breq	MLP_EXTFUNC_11
 	cpi	r17, (1<<LOAD_BUTTON) | (1<<MIDI_BUTTON)	; extended function set 2
@@ -5305,7 +5366,6 @@ MIDI_VELOCITY:
 ; Not implemented, but this is a good spot.
 
 ;-----------------------------------------------------------------------------
-
 
 	;-------------
 	;calculate dT:
@@ -6280,6 +6340,29 @@ STORE_HPF:
 	ldi	r16, 0x00		; Limit HP to min of 0
 STORE_HPF:
 	sts	HPF_I, r16
+
+.if !USE_ORIGINAL_Q_CALC
+;-------------------------------------------------------------------------------------------------------------------
+; Scale Filter Q value to compensate for resonance loss
+; Doing this here to get it out of the sample loop
+;-------------------------------------------------------------------------------------------------------------------
+
+	lds	r18, RESONANCE
+	lds	r16, LPF_I		;load 'F' value
+	ldi	r17, 0xff
+
+	sub	r17, r16		; 1-F
+	lsr	r17
+	ldi	r19, Q_OFFSET
+	add	r17, r19		; f = (1-F)/2+4
+
+	sub	r18, r17		; Q-(1-f)
+	brcc	REZ_OVERFLOW_CHECK	; if no overflow occured
+	ldi	r18, 0x00		;0x00 because of unsigned
+REZ_OVERFLOW_CHECK:
+	sts	SCALED_RESONANCE, r18
+.endif	; !USE_ORIGINAL_Q_CALC
+
 .endif	; MEEBLIP_SE_ORIGINAL_CODE
 
 	;---------------
@@ -10786,6 +10869,9 @@ usart_print_sound_parameter:
 
 .if USE_EXTENDED_MIDI_CONTROL
 	print_variable	PWMDEPTH
+	print_variable	MIDI_KNOB_2
+	print_variable	MIDI_KNOB_3
+	print_variable	MIDI_KNOB_4
 	print_variable	LFO2FREQ
 	print_variable	FMDEPTH
 	print_variable	MIXER_BALANCE
@@ -10832,6 +10918,8 @@ usart_print_sound_parameter:
 
 	print_variable	DCOA_LEVEL
 	print_variable	DCOB_LEVEL
+	print_variable	LPF_I
+	print_variable	SCALED_RESONANCE
 .if USE_MASTER_VOLUME
 	print_variable	VOLUME
 .endif	; USE_MASTER_VOLUME
@@ -10842,6 +10930,7 @@ usart_print_sound_parameter:
 ; -------------
 ; the strings
 
+STR_RESONANCE:		.db	0x0D, 0x0A, "RESONANCE      ", 0
 STR_CUTOFF:		.db	0x0D, 0x0A, "CUTOFF         ", 0
 STR_LFOFREQ:		.db	0x0D, 0x0A, "LFOFREQ        ", 0
 STR_PANEL_LFOLEVEL:	.db	0x0D, 0x0A, "LFOLEVEL       ", 0
@@ -10856,6 +10945,9 @@ STR_KNOB_AMP_ATTACK:	.db	0x0D, 0x0A, "AMP_ATTACK     ", 0
 
 .if USE_EXTENDED_MIDI_CONTROL
 STR_PWMDEPTH:		.db	0x0D, 0x0A, "PWMDEPTH       ", 0
+STR_MIDI_KNOB_2: 	.db	0x0D, 0x0A, "MIDI_KNOB_2    ", 0
+STR_MIDI_KNOB_3: 	.db	0x0D, 0x0A, "MIDI_KNOB_2    ", 0
+STR_MIDI_KNOB_4: 	.db	0x0D, 0x0A, "MIDI_KNOB_2    ", 0
 STR_FMDEPTH:		.db	0x0D, 0x0A, "FMDEPTH        ", 0
 STR_LFO2FREQ:		.db	0x0D, 0x0A, "LFO2FREQ       ", 0
 STR_MIXER_BALANCE:	.db	0x0D, 0x0A, "MIXER_BALANCE  ", 0
@@ -10869,7 +10961,6 @@ STR_ATTACKTIME2:	.db	0x0D, 0x0A, "ATTACKTIME2    ", 0
 STR_DECAYTIME2:		.db	0x0D, 0x0A, "DECAYTIME2     ", 0
 STR_SUSTAINLEVEL2:	.db	0x0D, 0x0A, "SUSTAINLEVEL2  ", 0
 STR_RELEASETIME2:	.db	0x0D, 0x0A, "RELEASETIME2   ", 0
-STR_RESONANCE:		.db	0x0D, 0x0A, "RESONANCE      ", 0
 
 STR_SW1:		.db	0x0D, 0x0A, "SW1            ", 0
 STR_SW2:		.db	0x0D, 0x0A, "SW2            ", 0
@@ -10886,6 +10977,8 @@ STR_PATCH_SWITCH4:	.db	0x0D, 0x0A, "PATCH_SWITCH4  ", 0
 
 STR_DCOA_LEVEL:		.db	0x0D, 0x0A, "DCOA_LEVEL     ", 0
 STR_DCOB_LEVEL:		.db	0x0D, 0x0A, "DCOB_LEVEL     ", 0
+STR_SCALED_RESONANCE:	.db	0x0D, 0x0A, "SCLD_RESONANCE ", 0
+STR_LPF_I:		.db	0x0D, 0x0A, "LPF_I          ", 0
 STR_VOLUME:		.db	0x0D, 0x0A, "VOLUME         ", 0
 
 STR_LINE:		.db	0x0D, 0x0A, "-------------------", 0
