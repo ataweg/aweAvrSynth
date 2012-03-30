@@ -2,7 +2,7 @@
 	<MANAGEMENT>
 		<ProjectName>aweMeeblipSE</ProjectName>
 		<Created>19-Aug-2011 07:36:58</Created>
-		<LastEdit>04-Jan-2012 16:46:14</LastEdit>
+		<LastEdit>30-Mar-2012 22:43:45</LastEdit>
 		<ICON>208</ICON>
 		<ProjectType>0</ProjectType>
 		<Created>19-Aug-2011 07:36:58</Created>
@@ -12,8 +12,8 @@
 	</MANAGEMENT>
 	<CODE_CREATION>
 		<ObjectFile>aweMeeblipSE.obj</ObjectFile>
-		<EntryFile>Z:\__GitHub__\aweAvrSynth\aweMeeblipSE\Firmware\V2.0\meeblip-se_V2.0.asm</EntryFile>
-		<SaveFolder>Z:\__GitHub__\aweAvrSynth\aweMeeblipSE\Firmware\V2.0\</SaveFolder></CODE_CREATION>
+		<EntryFile>K:\__GitHub__\aweAvrSynth\aweMeeblipSE\Firmware\V2.0\meeblip-se_V2.0.asm</EntryFile>
+		<SaveFolder>K:\__GitHub__\aweAvrSynth\aweMeeblipSE\Firmware\V2.0\</SaveFolder></CODE_CREATION>
 	<DEBUG_TARGET>
 		<CURRENT_TARGET>AVR Simulator</CURRENT_TARGET>
 		<CURRENT_PART>ATmega32.xml</CURRENT_PART>
@@ -27,9 +27,9 @@
 	<Debugger>
 		<Triggers></Triggers></Debugger>
 	<AvrAssembler>
-		<Folder>Z:\__GitHub__\aweAvrSynth\aweMeeblipSE\Firmware\V2.0\</Folder>
+		<Folder>K:\__GitHub__\aweAvrSynth\aweMeeblipSE\Firmware\V2.0\</Folder>
 		<RelPath>meeblip-se_V2.0.asm</RelPath>
-		<EntryFile>Z:\__GitHub__\aweAvrSynth\aweMeeblipSE\Firmware\V2.0\meeblip-se_V2.0.asm</EntryFile>
+		<EntryFile>K:\__GitHub__\aweAvrSynth\aweMeeblipSE\Firmware\V2.0\meeblip-se_V2.0.asm</EntryFile>
 		<IncludePath>C:\Program Files\Atmel\AVR Tools\AvrAssembler\Appnotes</IncludePath>
 		<V2IncludePath></V2IncludePath>
 		<V2Parameters>-l aweMeeblipSE.lst -m aweMeeblipSE.map</V2Parameters>
@@ -44,4 +44,4 @@
 		<PostCompile></PostCompile>
 		<SourceFiles>,,uart.inc</SourceFiles>
 	</AvrAssembler>
-	<ProjectIncludeDirs><Dirs><Dir>C:\Programme\Atmel\AVR Tools\AvrAssembler2\Appnotes</Dir></Dirs></ProjectIncludeDirs><ProjectFiles><Files><Name>\meeblip-se_V2.0.asm</Name><Name>uart.inc</Name><Name>C:\Programme\Atmel\AVR Tools\AvrAssembler2\Appnotes\m32def.inc</Name></Files></ProjectFiles><IOView><usergroups/><sort sorted="0" column="0" ordername="0" orderaddress="0" ordergroup="0"/></IOView><Files><File00000><FileId>00000</FileId><FileName>meeblip-se_V2.0.asm</FileName><Status>1</Status></File00000></Files><Events><Bookmarks></Bookmarks></Events><Trace><Filters></Filters></Trace></AVRStudio>
+	<ProjectIncludeDirs><Dirs><Dir>C:\Programme\Atmel\AVR Tools\AvrAssembler2\Appnotes</Dir></Dirs></ProjectIncludeDirs><ProjectFiles><Files><Name>K:\__GitHub__\aweAvrSynth\aweMeeblipSE\Firmware\V2.0\meeblip-se_V2.0.asm</Name><Name>uart.inc</Name></Files></ProjectFiles><IOView><usergroups/><sort sorted="0" column="0" ordername="1" orderaddress="1" ordergroup="1"/></IOView><Files><File00000><FileId>00000</FileId><FileName>meeblip-se_V2.0.asm</FileName><Status>1</Status></File00000></Files><Events><Bookmarks></Bookmarks></Events><Trace><Filters></Filters></Trace></AVRStudio>

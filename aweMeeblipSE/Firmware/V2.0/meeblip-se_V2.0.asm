@@ -301,7 +301,7 @@
 
 ;-----------------------------------------------------------------------------
 .else	; MEEBLIP_SE_ORIGINAL_CODE
-	.equ	MEEBLIP_V1_27_HW		= 0	; 0: use my cloned&modified pcb version 1.27
+	.equ	MEEBLIP_V1_27_HW		= 1	; 0: use my cloned&modified pcb version 1.27
 	.equ	USE_UART			= 1
 	.equ	KEEP_BUGS			= 0
 
