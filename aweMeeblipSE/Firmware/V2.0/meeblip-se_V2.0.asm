@@ -6,6 +6,17 @@
 ; requires asm2 assembler, asm leads to some undefined variable errors
 ;
 ; Changelog
+;
+; 2012.01.09	AWe	integrate changes from meeblip-se-v2.asm (V2.04 2012.01.05) from James Grahame
+;			(create a new version aweMeeblipSE_V2.04.asm)
+;			remove code parts previously controlled by the switches
+;			 * USE_ORIGINAL_MUL32X16, USE_ORIGINAL_MUL8X8S, USE_ORIGINAL_DCA,
+;			 * USE_OSCBOFF_LEVEL_CORRECTION, USE_ORIGINAL_WAVETABLES, USE_ORIGINAL_BANDLIMITED_PWM,
+;			 * USE_BANDLIMITED_DCO_A, USE_BANDLIMITED_DCO_B, USE_ORIGINAL_TAB_VCA
+;			set Q_OFFSET to 8, previous value was 24
+;			remove patch switch for SW_OSCA_WAVE_SIN and SW_OSCB_WAVE_SIN
+;			correct LED flash frequency for extended button functions
+;			correct some typos
 ; 2012.01.04	AWe	use better rounding for calculated table TAB_VCF
 ;			move calculation of scaled_resonance from isr to mainloop
 ;			change q offset from 32 to 24, lower values will cause clipping
@@ -26,8 +37,8 @@
 ;			use patch 0 as a default patch, it is save for over writing (USE_READ_ONLY_PATCH_ZERO)
 ;			in DCA function use a HW-multipier, not the shift-and-add algorithm for the
 ;			   16s*8u multiplication (USE_ORIGINAL_DCA)
-;			update env parameter from midi-cc or switches and knobes (USE_ORIGINAL_ENVELOP_CONTROL)
-;			map ATTACKTIME, ATTACKTIME2 to KNOB_AMP_ATTACK, KNOB_DCF_ATTACK and vice versa (USE_ORIGINAL_ENVELOP_CONTROL)
+;			update env parameter from midi-cc or switches and knobes (USE_ORIGINAL_ENVELOPE_CONTROL)
+;			map ATTACKTIME, ATTACKTIME2 to KNOB_AMP_ATTACK, KNOB_DCF_ATTACK and vice versa (USE_ORIGINAL_ENVELOPE_CONTROL)
 ;			level adjustment, when osc b is off (USE_OSCBOFF_LEVEL_CORRECTION)
 ;			master volume control - VOLUME 0..254 or -36db..+12db (USE_MASTER_VOLUME)
 ;			redesign PWM signal generation without using falling sawtooth waveform (USE_ORIGINAL_BANDLIMITED_PWM)
@@ -47,7 +58,7 @@
 ;			 now we have 12 subtables for each waveform; one subtable is used for 8 notes
 ;			osc A and osc B use their own WAVETABLE variable
 ;			remove dco_fm
-;			replace switch "osc fm" and "bandlimited osc" with "mixer ringmodulator" and "transponse"
+;			replace switch "osc fm" and "bandlimited osc" with "mixer ringmodulator" and "transpose"
 ; 2011.12.03	AWe	use DCOs from avrSynth, but without sine waveform
 ;			fix bug: adjust level of pwm waveform by adding a duty cycle depend offset
 ;			change slope of wavetable sawtooth from falling to rising
@@ -66,7 +77,7 @@
 ;			add features from LFO also to LFO2
 ;			correct sustain level after decay is done
 ;			clear env variables when envelope starts
-;			add "transponse" and keybaord tracking switch
+;			add "transpose" and keyboard tracking switch
 ;			use modified dcf amount control with range -128..+127
 ;			add dca mode switch 0 (gate), 1 (env)
 ; 2011.11.24	AWe	code beautification, replace blanks with tabs (tab width is 8)
@@ -97,6 +108,20 @@
 ;
 ;					Changelog
 ;
+;V2.04 2012.01.05	- Added maximum resonance table
+;			- Envelopes no longer restart on note off release if they're stopped
+;			- Replace MUL8X8S routine with hardware multiply
+;			- Updated LPM calls throughout code
+;			- Implement 2 byte offsets for all table lookups
+;			- New bandlimited waveforms with matched average amplitude (Axel Werner)
+;			- New 32x16 bit multiply, 32 bit load (AW)
+;			- Use signed multiply in DCA (AW)
+;			- New oscillator mix routine (AW)
+;			- New TAB_VCF, TAB_VCA and TIMETORATE tables (AW)
+;			- Fix envelope decay bug (AW)
+;V2.03 2011.12.20	- Added MIDI Velocity to VCF Envelope Modulation
+;			- Changed maximum resonance and resonance scaling limits
+;			- Updated oscillator mix levels because of mix clipping
 ;V2.02 2011.12.12 	- Corrected code to save pre-filtered waveform
 ;V2.01 2011.12.01	- Added inverse sawtooth waveform
 ;			- Fixed wavetable overflow in variable pulse calculation
@@ -111,7 +136,7 @@
 ;			- New knob scan routine (scans only the most recently converted analog channel)
 ;			- Dual ADSD envelopes
 ;			- PWM sweep switch and PWM rate knob (limited between 0-50% pulse duty cycle)
-;			- Filter envelop amount knob added
+;			- Filter envelope amount knob added
 ;			- MIDI control of all parameters
 ;			- Reorganized front panel
 ;			- MIDI knob and switch CC control
@@ -147,6 +172,7 @@
 ;	Laurie Biddulph - Worked with Jarek to translate his comments into English, ported to Atmega16
 ;	Daniel Kruszyna - Extended AVRsynth (several of his ideas are incorporated in MeeBlip)
 ;	Julian Schmidt  - Original filter algorithm
+; 	Axel Werner	- Code optimization, bug fixes and new bandlimited waveforms
 ;	James Grahame   - Ported and extended the AVRsynth code to MeeBlip hardware.
 ;
 ;-----------------------------------------------------------------------------
@@ -192,32 +218,24 @@
 .if MEEBLIP_SE_OPIMIZED_CODE
 ; change these values carefully
 	.equ	KEEP_BUGS			= 0
-	.equ	USE_ORIGINAL_MUL8X8S		= 0	; 0: use hw multilpier
-	.equ	USE_ORIGINAL_MUL32X16		= 0	; 0: use hw multilpier
 
 	.equ	USE_ORIGINAL_MIXER		= 1	; 0: use alternative mixer
-	.equ	USE_BANDLIMITED_DCO_A		= 1
-	.equ	USE_BANDLIMITED_DCO_B		= 1
-	.equ	USE_ORIGINAL_DCA		= 0	; 0: use hw multilpier
 	.equ	USE_ORIGINAL_NOISEGEN		= 0	; 0: new algorithm
 	.equ	USE_ORIGINAL_VCFENVMOD		= 0	; 0: range -128..+127
 	.equ	USE_ORIGINAL_SWITCH_MAP		= 1
-	.equ	USE_ORIGINAL_TAB_VCA		= 0	; 0: improved, calculated tables
 	.equ	USE_ORIGINAL_TAB_VCF		= 0	; 0: improved, calculated tables
-	.equ	USE_ORIGINAL_WAVETABLES 	= 0	; 0: all subtables in the sets have the same rms value
-	.equ	USE_ORIGINAL_BANDLIMITED_PWM 	= 0	; 0: requires only one sawtooth table set
 	.equ	USE_ORIGINAL_DCO_FM		= 1
 	.equ	USE_ORIGINAL_RAW_OSC		= 1
 	.equ	USE_ORIGINAL_Q_CALC		= 1
-	.equ	Q_OFFSET			= 24
+	.equ	Q_OFFSET			= 8
 	.equ	USE_ORIGINAL_RESONANCE_LIMIT	= 0	; 0: remove ranger limitation from v2.02
 	.equ	USE_ORIGINAL_PWM_LIMIT		= 0	; 0: allow duty cycle near 50%
 	.equ	USE_ORIGINAL_MIXER_LEVEL	= 1	; 0: will cause signal overflow
-	.equ	USE_ORIGINAL_ENVELOP_CONTROL	= 1
+	.equ	USE_ORIGINAL_ENVELOPE_CONTROL	= 1
 
 	.equ	USE_MORE_SWITCHES		= 0
 	.equ	USE_DCA_MOD_SWITCH		= 0 & USE_MORE_SWITCHES
-	.equ	USE_EXTEDEND_BUTTON_FUNCTIONS	= 0
+	.equ	USE_EXTENDED_BUTTON_FUNCTIONS	= 0
 	.equ	USE_EXTENDED_LFO2		= 0 & USE_MORE_SWITCHES
 	.equ	USE_EXTENDED_MIDI_CONTROL	= 0 & USE_MORE_SWITCHES
 	.equ	USE_INIT_ENV_GENERATORS		= 0
@@ -232,7 +250,6 @@
 
 	.equ	USE_EXTENDED_PATCH		= 0 & USE_MORE_SWITCHES
 	.equ	USE_MASTER_VOLUME		= 0
-	.equ	USE_OSCBOFF_LEVEL_CORRECTION	= 0
 	.equ	USE_READ_ONLY_PATCH_ZERO	= 0
 	.equ	USE_RINGMODULATOR		= 1 & !USE_ORIGINAL_MIXER & !USE_ORIGINAL_RAW_OSC & USE_MORE_SWITCHES
 	.equ	USE_RINGMODULATOR_BALANCE	= 0
@@ -243,33 +260,25 @@
 .else	; MEEBLIP_SE_OPIMIZED_CODE
 ; don't change these values
 	.equ	KEEP_BUGS			= 1
-	.equ	USE_ORIGINAL_MUL8X8S		= 1	; 0: use hw multilpier
-	.equ	USE_ORIGINAL_MUL32X16		= 1	; 0: use hw multilpier
 
 	.equ	USE_ORIGINAL_MIXER		= 1	; 0: use alternative mixer
-	.equ	USE_BANDLIMITED_DCO_A		= 1
-	.equ	USE_BANDLIMITED_DCO_B		= 1
-	.equ	USE_ORIGINAL_DCA		= 1	; 0: use hw multilpier
 	.equ	USE_ORIGINAL_NOISEGEN		= 1	; 0: new algorithm
 	.equ	USE_ORIGINAL_VCFENVMOD		= 1	; 0: range -128..+127
 	.equ	USE_ORIGINAL_SWITCH_MAP		= 1
-	.equ	USE_ORIGINAL_TAB_VCA		= 1	; 0: improved, calculated tables
 	.equ	USE_ORIGINAL_TAB_VCF		= 1	; 0: improved, calculated tables
-	.equ	USE_ORIGINAL_WAVETABLES 	= 1	; 0: all subtables in the sets have the same rms value
-	.equ	USE_ORIGINAL_BANDLIMITED_PWM 	= 1	; 0: requires only one sawtooth table set
 	.equ	USE_ORIGINAL_DCO_FM		= 1
 	.equ	USE_ORIGINAL_RAW_OSC		= 1
 	.equ	USE_ORIGINAL_Q_CALC		= 1
-	.equ	Q_OFFSET			= 32
+	.equ	Q_OFFSET			= 8
 	.equ	USE_ORIGINAL_RESONANCE_LIMIT	= 1	; 0: remove ranger limitation from v2.02
 	.equ	USE_ORIGINAL_PWM_LIMIT		= 1	; 0: allow duty cycle near 50%
 	.equ	USE_ORIGINAL_MIXER_LEVEL	= 1	; 0: will cause signal overflow
-	.equ	USE_ORIGINAL_ENVELOP_CONTROL	= 1
+	.equ	USE_ORIGINAL_ENVELOPE_CONTROL	= 1
 
 	.equ	USE_MORE_SWITCHES		= 0
 	.equ	USE_DCA_MOD_SWITCH		= 0 & USE_MORE_SWITCHES
 	.equ	USE_EXTENDED_MIDI_CONTROL	= 0
-	.equ	USE_EXTEDEND_BUTTON_FUNCTIONS	= 0 & USE_MORE_SWITCHES
+	.equ	USE_EXTENDED_BUTTON_FUNCTIONS	= 0 & USE_MORE_SWITCHES
 	.equ	USE_EXTENDED_LFO2		= 0 & USE_MORE_SWITCHES
 	.equ	USE_INIT_ENV_GENERATORS		= 0
 	.equ	USE_INIT_LFO2			= 0
@@ -283,7 +292,6 @@
 
 	.equ	USE_EXTENDED_PATCH		= 0 & USE_MORE_SWITCHES
 	.equ	USE_MASTER_VOLUME		= 0
-	.equ	USE_OSCBOFF_LEVEL_CORRECTION	= 0
 	.equ	USE_READ_ONLY_PATCH_ZERO	= 0
 	.equ	USE_RINGMODULATOR		= 0 & !USE_ORIGINAL_MIXER & !USE_ORIGINAL_RAW_OSC & USE_MORE_SWITCHES
 	.equ	USE_RINGMODULATOR_BALANCE	= 0
@@ -293,35 +301,27 @@
 
 ;-----------------------------------------------------------------------------
 .else	; MEEBLIP_SE_ORIGINAL_CODE
-	.equ	MEEBLIP_V1_27_HW		= 1	; 0: use my cloned&modified pcb version 1.27
-	.equ	USE_UART			= 0
+	.equ	MEEBLIP_V1_27_HW		= 0	; 0: use my cloned&modified pcb version 1.27
+	.equ	USE_UART			= 1
 	.equ	KEEP_BUGS			= 0
-	.equ	USE_ORIGINAL_MUL8X8S		= 0	; 0: use hw multilpier
-	.equ	USE_ORIGINAL_MUL32X16		= 0	; 0: use hw multilpier
 
 	.equ	USE_ORIGINAL_MIXER		= 0	; 0: use alternative mixer
-	.equ	USE_BANDLIMITED_DCO_A		= 1
-	.equ	USE_BANDLIMITED_DCO_B		= 1
-	.equ	USE_ORIGINAL_DCA		= 0	; 0: use hw multilpier
 	.equ	USE_ORIGINAL_NOISEGEN		= 0	; 0: new algorithm
 	.equ	USE_ORIGINAL_VCFENVMOD		= 0	; 0: range -128..+127
 	.equ	USE_ORIGINAL_SWITCH_MAP		= 0
-	.equ	USE_ORIGINAL_TAB_VCA		= 0	; 0: improved, calculated tables
 	.equ	USE_ORIGINAL_TAB_VCF		= 0	; 0: improved, calculated tables
-	.equ	USE_ORIGINAL_WAVETABLES		= 0	; 0: all subtables in the sets have the same rms value
-	.equ	USE_ORIGINAL_BANDLIMITED_PWM 	= 0	; 0: requires only one sawtooth table set
-	.equ	USE_ORIGINAL_DCO_FM		= 0                                                           	; 0: use switch for transponse
+	.equ	USE_ORIGINAL_DCO_FM		= 1 	; 0: use switch for transpose
 	.equ	USE_ORIGINAL_RAW_OSC		= 0	; 0: use switch for Ringmodulator enable, set SW_ANTI_ALIAS to 1
 	.equ	USE_ORIGINAL_Q_CALC		= 0
-	.equ	Q_OFFSET			= 24
+	.equ	Q_OFFSET			= 16
 	.equ	USE_ORIGINAL_RESONANCE_LIMIT	= 0	; 0: knob value is limited to 94% ($F6)
 	.equ	USE_ORIGINAL_PWM_LIMIT		= 0	; 0. duty cycle 1.5%..42,7% (4..109), 1: 1.5%..50% (4..127)
 	.equ	USE_ORIGINAL_MIXER_LEVEL	= 1	; 0: 6 db more output level, 1: (recommended)
-	.equ	USE_ORIGINAL_ENVELOP_CONTROL	= 0
+	.equ	USE_ORIGINAL_ENVELOPE_CONTROL	= 0
 
 	.equ	USE_MORE_SWITCHES		= 1
 	.equ	USE_DCA_MOD_SWITCH		= 1 & USE_MORE_SWITCHES
-	.equ	USE_EXTEDEND_BUTTON_FUNCTIONS	= 1
+	.equ	USE_EXTENDED_BUTTON_FUNCTIONS	= 1
 	.equ	USE_EXTENDED_LFO2		= 0 & USE_MORE_SWITCHES	; 1: add waveform selection to lfo2 tri, sqr, random
 	.equ	USE_EXTENDED_MIDI_CONTROL	= 1 & USE_MORE_SWITCHES
 	.equ	USE_INIT_ENV_GENERATORS		= 0 			; 1: can cause clicks
@@ -336,7 +336,6 @@
 
 	.equ	USE_EXTENDED_PATCH		= 1 & USE_MORE_SWITCHES	; 0: 16 byte patch, 1: 48 byte patch
 	.equ	USE_MASTER_VOLUME		= 1                    	; 0: master volume control; 1: control it via MIDI cc
-	.equ	USE_OSCBOFF_LEVEL_CORRECTION	= 1                    	; 0: no level correction when osc b is off, 1: do a level correction
 	.equ	USE_READ_ONLY_PATCH_ZERO	= 1			; 0: can overwrite of patch 0, 1: protect patch 0 for overwriting
 	.equ	USE_RINGMODULATOR		= 1 & !USE_ORIGINAL_MIXER & !USE_ORIGINAL_RAW_OSC & USE_MORE_SWITCHES
 	.equ	USE_RINGMODULATOR_BALANCE	= 1
@@ -497,9 +496,9 @@ PATCH_SWITCH3:		.BYTE 1
 
 PATCH_SWITCH4:		.BYTE 1
 	.equ SW_OSCA_WAVE_EXT		= 0	; 0=normal squ or SAW, 1=extended pwm or tri
-	.equ SW_OSCA_WAVE_SIN		= 1	; 0=normal, 1=sin
+	.equ SW_USER_4_1		= 1	;
 	.equ SW_OSCB_WAVE_EXT		= 2	; 0=normal SQU or SAW, 1=extended pwm or tri
-	.equ SW_OSCB_WAVE_SIN		= 3	; 0=normal, 1=sin
+	.equ SW_USER_4_3		= 3	;
 	.equ SW_USER_4_4		= 4	;
 	.equ SW_USER_4_5		= 5	;
 	.equ SW_LFO2_WAVE		= 6	; 0=tri, 1=squ
@@ -573,6 +572,7 @@ ENVPHASE2:		.BYTE 1		; 0=stop 1=attack 2=decay 3=sustain 4=release
 ENV_FRAC_L2:		.BYTE 1
 ENV_FRAC_H2:		.BYTE 1
 ENV_INTEGR2:		.BYTE 1
+VELOCITY_ENVMOD:	.BYTE 1
 
 LFOPHASE:		.BYTE 1		; 0=up 1=down
 LFO_FRAC_L:		.BYTE 1		;\
@@ -619,14 +619,9 @@ DELTAB_0:		.byte 1
 DELTAB_1:		.byte 1
 DELTAB_2:		.byte 1
 
-.if USE_ORIGINAL_WAVETABLES
-; Wavetable select
-WAVETABLE:		.byte 1		; Bandlimited wavetable 0..16
-.else	; USE_ORIGINAL_WAVETABLES
 ; Wavetable select
 WAVETABLE_A:		.byte 1		; Bandlimited wavetable 0..11
 WAVETABLE_B:		.byte 1		; Bandlimited wavetable 0..11
-.endif	; USE_ORIGINAL_WAVETABLES
 
 ; oscillator pulse width
 PULSE_WIDTH:		.byte 1
@@ -654,6 +649,7 @@ WRITE_PATCH_OFFSET_H:	.byte 1		; start of patch in eeprom
 SCALED_RESONANCE:	.byte 1		; not used
 b_L:			.byte 1
 b_H:			.byte 1
+VCF_STATUS: 		.byte 1		; 0 indicates VCF off, 1 = on
 
 .if !USE_ORIGINAL_NOISEGEN
 LFSR_0:			.byte 1		;\
@@ -686,11 +682,11 @@ MIDICC:	.byte $80
 	.equ MIXER_BALANCE	= MIDICC + $14	; Knob 7	20
 	.equ MASTER_VOLUME	= MIDICC + $15	; Knob 8	21
 
-	.equ ATTACKTIME		= MIDICC + $16	; Slider 1	22 ; DCA envelop
+	.equ ATTACKTIME		= MIDICC + $16	; Slider 1	22 ; DCA envelope
 	.equ DECAYTIME		= MIDICC + $17	; Slider 2	23
 	.equ SUSTAINLEVEL	= MIDICC + $18	; Slider 3	24
 	.equ RELEASETIME	= MIDICC + $19	; Slider 4	25
-	.equ ATTACKTIME2	= MIDICC + $1A	; Slider 5	26 ; DCF envelop
+	.equ ATTACKTIME2	= MIDICC + $1A	; Slider 5	26 ; DCF envelope
 	.equ DECAYTIME2		= MIDICC + $1B	; Slider 6	27
 	.equ SUSTAINLEVEL2	= MIDICC + $1C	; Slider 7	28
 	.equ RELEASETIME2	= MIDICC + $1D	; Slider 8	29
@@ -763,14 +759,14 @@ MIDICC:	.byte $80
 	.equ S_DCF_KBD_TRACK	= MIDICC + $57
 ; Switches 4
 	.equ S_OSCA_WAVE_EXT	= MIDICC + $58
-	.equ S_OSCA_WAVE_SIN	= MIDICC + $59
+	.equ S_USER_4_1		= MIDICC + $59
 	.equ S_OSCB_WAVE_EXT	= MIDICC + $5A
-	.equ S_OSCB_WAVE_SIN	= MIDICC + $5B
+	.equ S_USER_4_3		= MIDICC + $5B
 	.equ S_USER_4_4		= MIDICC + $5C
 	.equ S_USER_4_5		= MIDICC + $5D
 	.equ S_LFO2_WAVE	= MIDICC + $5E
 	.equ S_LFO2_RANDOM	= MIDICC + $5F
-.endif	; USE_EXTEDEND_BUTTON_FUNCTIONS
+.endif	; USE_EXTENDED_BUTTON_FUNCTIONS
 
 
 ; Patch save/load and MIDI channel set
@@ -779,19 +775,19 @@ LED_TIMER:		.byte 1		; number of blinks before reset
 BUTTON_STATUS:		.byte 1		; MIDI=1, SAVE=3, LOAD=7, CLEAR=0
 CONTROL_SWITCH:		.byte 1		; Last panel switch moved: 1..16, where zero indicates no movement.
 
-.if !USE_ORIGINAL_ENVELOP_CONTROL
+.if !USE_ORIGINAL_ENVELOPE_CONTROL
 MIDI_TASK_UPDATE:	.byte 1
 
 	.equ	UPDATE_ENV_DCF	= 0
 	.equ	UPDATE_ENV_DCA	= 1
 	.equ	UPDATE_VOLUME	= 2
-.endif	; !USE_ORIGINAL_ENVELOP_CONTROL
+.endif	; !USE_ORIGINAL_ENVELOPE_CONTROL
 
 .if USE_MASTER_VOLUME
 VOLUME:			.byte 1
 .if !USE_EXTENDED_MIDI_CONTROL
 MASTER_VOLUME:			.byte 1
-.endif
+.endif	; !USE_EXTENDED_MIDI_CONTROL
 .endif	; USE_MASTER_VOLUME
 
 ;-----------------------------------------------------------------------------
@@ -864,19 +860,19 @@ MASTER_VOLUME:			.byte 1
 	.db	-1	; X			; $0F -> $3F ; Undefined
 
 	.db	0x80	; PWMDEPTH		; $10 -> $0E	; Knob 1	14 ; (=LFO2LEVEL)
-	.db	0x00	; LFO2FREQ		; $11 -> $0F	; Knob 2	15 ; currently not used
-	.db	0x00	; FMDEPTH		; $12 -> $10	; Knob 3	16 ; currently not used
-	.db	-1	; X			; $13 -> $11	; Knob 4	17
-	.db	-1	; X			; $14 -> $12	; Knob 5	18
-	.db	-1	; X			; $15 -> $13	; Knob 6	19
+	.db	-1	; MIDI_KNOB_2		; $11 -> $0F	; Knob 2	15 ; currently not used
+	.db	-1	; MIDI_KNOB_3		; $12 -> $10	; Knob 3	16 ; currently not used
+	.db	-1	; MIDI_KNOB_4		; $13 -> $11	; Knob 4	17
+	.db	0x80	; LFO2FREQ		; $14 -> $12	; Knob 5	18
+	.db	0x00	; FMDEPTH		; $15 -> $13	; Knob 6	19
 	.db	0x80	; MIXER_BALANCE		; $16 -> $14	; Knob 7	20
 	.db	0x80	; MASTER_VOLUME		; $17 -> $15	; Knob 8	21
 
-	.db	0x00	; ATTACKTIME		; $18 -> $16	; Slider 1	22 ; DCA envelop
+	.db	0x00	; ATTACKTIME		; $18 -> $16	; Slider 1	22 ; DCA envelope
 	.db	0x00	; DECAYTIME		; $19 -> $17	; Slider 2	23
 	.db	0xFE	; SUSTAINLEVEL		; $1A -> $18	; Slider 3	24
 	.db	0x00	; RELEASETIME		; $1B -> $19	; Slider 4	25
-	.db	0x00	; ATTACKTIME2		; $1C -> $1A	; Slider 5	26 ; DCF envelop
+	.db	0x00	; ATTACKTIME2		; $1C -> $1A	; Slider 5	26 ; DCF envelope
 	.db	0x00	; DECAYTIME2		; $1D -> $1B	; Slider 6	27
 	.db	0xFE	; SUSTAINLEVEL2		; $1E -> $1C	; Slider 7	28
 	.db	0x00	; RELEASETIME2		; $1F -> $1D	; Slider 8	29
@@ -910,9 +906,9 @@ MASTER_VOLUME:			.byte 1
 			;	SW_DCF_KBD_TRACK= 7 x	; 0=off, 1=on (default)
 	.db	0x00	; SW4 -> PATCH_SWITCH4	; $23 -> $2F
 			;	SW_OSCA_WAVE_EXT= 0	; 0=normal squ or SAW, 1=extended pwm or tri
-			;	SW_OSCA_WAVE_SIN= 1	; 0=normal, 1=sin
+			;	SW_USER_4_2	= 1	;
 			;	SW_OSCB_WAVE_EXT= 2	; 0=normal SQU or SAW, 1=extended pwm or tri
-			;	SW_OSCB_WAVE_SIN= 3	; 0=normal, 1=sin
+			;	SW_USER_4_3	= 3	;
 			;	SW_USER_4_4	= 4	;
 			;	SW_USER_4_5	= 5	;
 			;	SW_LFO2_WAVE	= 6	; 0=tri, 1=squ
@@ -944,19 +940,19 @@ MASTER_VOLUME:			.byte 1
 	.db	-1	; X			; $0F -> $3F ; Undefined
 
 	.db	0x60	; PWMDEPTH		; $10 -> $0E	; Knob 1	14 ; (=LFO2LEVEL)
-	.db	0x80	; LFO2FREQ		; $11 -> $0F	; Knob 2	15 ; currently not used
-	.db	0xFF	; FMDEPTH		; $12 -> $10	; Knob 3	16 ; currently not used
-	.db	-1	; X			; $13 -> $11	; Knob 4	17
-	.db	-1	; X			; $14 -> $12	; Knob 5	18
-	.db	-1	; X			; $15 -> $13	; Knob 6	19
+	.db	-1	; MIDI_KNOB_2		; $11 -> $0F	; Knob 2	15 ; currently not used
+	.db	-1	; MIDI_KNOB_3		; $12 -> $10	; Knob 3	16 ; currently not used
+	.db	-1	; MIDI_KNOB_4		; $13 -> $11	; Knob 4	17
+	.db	0x80	; LFO2FREQ		; $14 -> $12	; Knob 5	18
+	.db	0xFF	; FMDEPTH		; $15 -> $13	; Knob 6	19
 	.db	0x80	; MIXER_BALANCE		; $16 -> $14	; Knob 7	20
 	.db	0x80	; MASTER_VOLUME		; $17 -> $15	; Knob 8	21
 
-	.db	0x00	; ATTACKTIME		; $18 -> $16	; Slider 1	22 ; DCA envelop
+	.db	0x00	; ATTACKTIME		; $18 -> $16	; Slider 1	22 ; DCA envelope
 	.db	0xA0	; DECAYTIME		; $19 -> $17	; Slider 2	23
 	.db	0x00	; SUSTAINLEVEL		; $1A -> $18	; Slider 3	24
 	.db	0xA0	; RELEASETIME		; $1B -> $19	; Slider 4	25
-	.db	0x00	; ATTACKTIME2		; $1C -> $1A	; Slider 5	26 ; DCF envelop
+	.db	0x00	; ATTACKTIME2		; $1C -> $1A	; Slider 5	26 ; DCF envelope
 	.db	0x00	; DECAYTIME2		; $1D -> $1B	; Slider 6	27
 	.db	0x00	; SUSTAINLEVEL2		; $1E -> $1C	; Slider 7	28
 	.db	0x00	; RELEASETIME2		; $1F -> $1D	; Slider 8	29
@@ -990,9 +986,9 @@ MASTER_VOLUME:			.byte 1
 			;	SW_DCF_KBD_TRACK= 7 x	; 0=off, 1=on (default)
 	.db	0x00	; SW4 -> PATCH_SWITCH4	; $23 -> $2F
 			;	SW_OSCA_WAVE_EXT= 0 	; 0=normal squ or SAW, 1=extended pwm or tri
-			;	SW_OSCA_WAVE_SIN= 1 	; 0=normal, 1=sin
+			;	SW_USER_4_1	= 1 	;
 			;	SW_OSCB_WAVE_EXT= 2 	; 0=normal SQU or SAW, 1=extended pwm or tri
-			;	SW_OSCB_WAVE_SIN= 3 	; 0=normal, 1=sin
+			;	SW_USER_4_3	= 3 	;
 			;	SW_USER_4_4	= 4 	;
 			;	SW_USER_4_5	= 5 	;
 			;	SW_LFO2_WAVE	= 6 	; 0=tri, 1=squ
@@ -1002,11 +998,80 @@ MASTER_VOLUME:			.byte 1
 ; 3rd patch
 	.org	0x60	; 3rd patch
 
-	.db	0xFE, 0xFE, 0xEE, 0x34,  0x3B, 0x00, 0x29, 0x8F
-	.db	0xFF, 0xFF, 0xEC, 0x00,  0x86, 0x00, 0xFF, 0xFF
-	.db	0x60, 0x80, 0xFF, 0xFF,  0xFF, 0xFF, 0x80, 0x80
-	.db	0x00, 0x86, 0x00, 0x86,  0x00, 0xEC, 0x00, 0xEC
-	.db	0x8E, 0x8F, 0xF8, 0x00
+	; Unshifted knobs (potentiometer 0 through 7)
+	.db	0xFE	; RESONANCE		; $00 -> $30
+	.db	0xFE	; CUTOFF		; $01 -> $31
+	.db	0xE0	; LFOFREQ		; $02 -> $32
+	.db	0x30	; PANEL_LFOLEVEL	; $03 -> $33
+	.db	0x00	; VCFENVMOD		; $04 -> $34
+	.db	0x00	; PORTAMENTO		; $05 -> $35
+	.db	0x28	; PULSE_KNOB		; $06 -> $36	; (=LFO2FREQ)
+	.db	0x8F	; OSC_DETUNE		; $07 -> $37
+
+	; Shifted knobs (potentiometer 0 through 7)
+	.db	-1	; X			; $08 -> $38 ; Undefined
+	.db	-1	; X			; $09 -> $39 ; Undefined
+	.db	0xE8	; KNOB_DCF_DECAY	; $0A -> $3A
+	.db	0x00	; KNOB_DCF_ATTACK	; $0B -> $3B
+	.db	0x80	; KNOB_AMP_DECAY	; $0C -> $3C
+	.db	0x00	; KNOB_AMP_ATTACK	; $0D -> $3D
+	.db	-1	; X			; $0E -> $3E ; Undefined
+	.db	-1	; X			; $0F -> $3F ; Undefined
+
+	.db	0x60	; PWMDEPTH		; $10 -> $0E	; Knob 1	14 ; (=LFO2LEVEL)
+	.db	-1	; MIDI_KNOB_2		; $11 -> $0F	; Knob 2	15 ; currently not used
+	.db	-1	; MIDI_KNOB_3		; $12 -> $10	; Knob 3	16 ; currently not used
+	.db	-1	; MIDI_KNOB_4		; $13 -> $11	; Knob 4	17
+	.db	0x80	; LFO2FREQ		; $14 -> $12	; Knob 5	18
+	.db	0xFF	; FMDEPTH		; $15 -> $13	; Knob 6	19
+	.db	0x80	; MIXER_BALANCE		; $16 -> $14	; Knob 7	20
+	.db	0x80	; MASTER_VOLUME		; $17 -> $15	; Knob 8	21
+
+	.db	0x00	; ATTACKTIME		; $18 -> $16	; Slider 1	22 ; DCA envelope
+	.db	0x80	; DECAYTIME		; $19 -> $17	; Slider 2	23
+	.db	0x00	; SUSTAINLEVEL		; $1A -> $18	; Slider 3	24
+	.db	0x80	; RELEASETIME		; $1B -> $19	; Slider 4	25
+	.db	0x00	; ATTACKTIME2		; $1C -> $1A	; Slider 5	26 ; DCF envelope
+	.db	0xE8	; DECAYTIME2		; $1D -> $1B	; Slider 6	27
+	.db	0x00	; SUSTAINLEVEL2		; $1E -> $1C	; Slider 7	28
+	.db	0xE8	; RELEASETIME2		; $1F -> $1D	; Slider 8	29
+
+	.db	0x00	; SW1 -> PATCH_SWITCH1	; $20 -> $2C
+			;	SW_KNOB_SHIFT	= 0	; 0=lower, 1=upper
+			;	SW_OSC_FM	= 1 	;
+			;	SW_LFO_RANDOM	= 2 	; 0=norm, 1=rand
+			;	SW_LFO_WAVE	= 3 	; 0=tri, 1=squ
+			;	SW_FILTER_MODE	= 4	; 0=lp, 1=hp
+			;	SW_DISTORTION	= 5	; 0=off, 1=on
+			;	SW_LFO_ENABLE	= 6	;
+			;	SW_LFO_DEST	= 7	; 0=DCF, 1=DCO
+	.db	0x8F	; SW2 -> PATCH_SWITCH2	; $21 -> $2D
+			;	SW_ANTI_ALIAS	= 0 x	;
+			;	SW_OSCB_OCT	= 1 x	; 0=down, 1=up
+			;	SW_OSCB_ENABLE	= 2 x	; 0=off, 1=on
+			;	SW_OSCB_WAVE	= 3 x	; 0=saw, 1=squ
+			;	SW_SUSTAIN	= 4	;
+			;	SW_OSCA_NOISE	= 5	; 0=off, 1=on
+			;	SW_PWM_SWEEP	= 6	; 0=off, 1=LFO2
+			;	SW_OSCA_WAVE	= 7 x	; 0=saw, 1=squ
+	.db	0xF8	; SW3 -> PATCH_SWITCH3	; $22 -> $2E
+			;	SW_USER_3_0	= 0 	;
+			;	SW_USER_3_1	= 1 	;
+			;	SW_MIX_RING	= 2	; 0=Mixer(default), 1=Ringmodulator
+			;	SW_TRANSPOSE	= 3 x	; 0=down, 1=up (default)
+			;	SW_DCA_MODE	= 4 x	; 0=gate, 1=env (default)
+			;	SW_MODWHEEL_ENA	= 5 x	; 0=diable, 1=enable (default)
+			;	SW_LFO_KBD_SYNC	= 6 x	; 0=off, 1=on (default)
+			;	SW_DCF_KBD_TRACK= 7 x	; 0=off, 1=on (default)
+	.db	0x00	; SW4 -> PATCH_SWITCH4	; $23 -> $2F
+			;	SW_OSCA_WAVE_EXT= 0 	; 0=normal squ or SAW, 1=extended pwm or tri
+			;	SW_USER_4_1	= 1 	;
+			;	SW_OSCB_WAVE_EXT= 2 	; 0=normal SQU or SAW, 1=extended pwm or tri
+			;	SW_USER_4_3	= 3 	;
+			;	SW_USER_4_4	= 4 	;
+			;	SW_USER_4_5	= 5 	;
+			;	SW_LFO2_WAVE	= 6 	; 0=tri, 1=squ
+			;	SW_LFO2_RANDOM	= 7 	; 0=norm, 1=rand
 
 ;-------------------------
 ; 4th patch
@@ -1170,76 +1235,27 @@ DELTA_C1:
 ;-----------------------------------------------------------------------------
 ; VCF Filter Cutoff
 ;
-; Log table for calculating filter cutoff levels so they sound linear
-; to our non-linear ears.
-
-
+; value = (16th root of 2)**(index+1)
+;
 .if USE_ORIGINAL_TAB_VCF
 TAB_VCF:
-	.DW	0x0101
-	.DW	0x0101
-	.DW	0x0101
-	.DW	0x0101
-	.DW	0x0101
-	.DW	0x0202
-	.DW	0x0202
-	.DW	0x0202
-	.DW	0x0202
-	.DW	0x0202
-	.DW	0x0202
-	.DW	0x0202
-	.DW	0x0202
-	.DW	0x0202
-	.DW	0x0202
-	.DW	0x0403
-	.DW	0x0404
-	.DW	0x0404
-	.DW	0x0505
-	.DW	0x0505
-	.DW	0x0606
-	.DW	0x0606
-	.DW	0x0606
-	.DW	0x0807
-	.DW	0x0808
-	.DW	0x0909
-	.DW	0x0A0A
-	.DW	0x0A0A
-	.DW	0x0C0B
-	.DW	0x0C0C
-	.DW	0x0D0C
-	.DW	0x0F0E
-	.DW	0x1110
-	.DW	0x1212
-	.DW	0x1413
-	.DW	0x1615
-	.DW	0x1817
-	.DW	0x1A19
-	.DW	0x1C1B
-	.DW	0x201E
-	.DW	0x2221
-	.DW	0x2423
-	.DW	0x2826
-	.DW	0x2C2A
-	.DW	0x302E
-	.DW	0x3432
-	.DW	0x3836
-	.DW	0x403A
-	.DW	0x4442
-	.DW	0x4C48
-	.DW	0x524F
-	.DW	0x5855
-	.DW	0x615D
-	.DW	0x6865
-	.DW	0x706C
-	.DW	0x7E76
-	.DW	0x8A85
-	.DW	0x9690
-	.DW	0xA49D
-	.DW	0xB0AB
-	.DW	0xC4BA
-	.DW	0xD8CE
-	.DW	0xE8E0
-	.DW	0xFFF4
+	.db	  1,   1,   1,   1,   1,   1,   1,   1		;   0
+	.db	  1,   1,   1,   1,   1,   1,   1,   2		;   8
+	.db	  2,   2,   2,   2,   2,   2,   2,   2		;  16
+	.db	  2,   3,   3,   3,   3,   3,   3,   3		;  24
+	.db	  4,   4,   4,   4,   4,   5,   5,   5		;  32
+	.db	  5,   6,   6,   6,   7,   7,   7,   7		;  40
+	.db	  8,   8,   9,   9,   9,  10,  10,  11		;  48
+	.db	 11,  12,  12,  13,  14,  14,  15,  16		;  56
+	.db	 16,  17,  18,  19,  19,  20,  21,  22		;  64
+	.db	 23,  24,  25,  26,  28,  29,  30,  31		;  72
+	.db	 33,  34,  36,  38,  39,  41,  43,  45		;  80
+	.db	 47,  49,  51,  53,  56,  58,  61,  63		;  88
+	.db	 66,  69,  72,  76,  79,  82,  86,  90		;  96
+	.db	 94,  98, 103, 107, 112, 117, 122, 127		; 104
+	.db	133, 139, 145, 152, 158, 165, 173, 181		; 112
+	.db	189, 197, 206, 215, 224, 234, 245, 255		; 120
+
 .else	; USE_ORIGINAL_TAB_VCF
 
 ; caluclated filter coeff, very similar to original values
@@ -1307,7 +1323,7 @@ TIMETORATE:
 	.DW	   44		; 12.09 S
 	.DW	   35		; 15.55 S
 	.DW	   27		; 20.00 S
-	.DW	   19		; 28,26 S	slow lfo, attack/rise time
+	.DW	   19		; 28.26 S	slow lfo, attack/rise time
 
 ;-----------------------------------------------------------------------------
 ;
@@ -1315,145 +1331,13 @@ TIMETORATE:
 ;
 ; Amplitude level lookup table. Envelopes levels are calculated as linear
 ; and then converted to approximate an exponential saturation curve.
-
-.if USE_ORIGINAL_TAB_VCA
-TAB_VCA:
-	.DW	0x0000
-	.DW	0x0101
-	.DW	0x0101
-	.DW	0x0101
-	.DW	0x0101
-	.DW	0x0101
-	.DW	0x0202
-	.DW	0x0202
-	.DW	0x0202
-	.DW	0x0302
-	.DW	0x0303
-	.DW	0x0303
-	.DW	0x0404
-	.DW	0x0404
-	.DW	0x0404
-	.DW	0x0505
-	.DW	0x0505
-	.DW	0x0606
-	.DW	0x0606
-	.DW	0x0606
-	.DW	0x0707
-	.DW	0x0707
-	.DW	0x0707
-	.DW	0x0808
-	.DW	0x0808
-	.DW	0x0808
-	.DW	0x0909
-	.DW	0x0909
-	.DW	0x0909
-	.DW	0x0A0A
-	.DW	0x0B0B
-	.DW	0x0C0C
-	.DW	0x0C0C
-	.DW	0x0D0D
-	.DW	0x0E0E
-	.DW	0x0F0F
-	.DW	0x1010
-	.DW	0x1111
-	.DW	0x1212
-	.DW	0x1313
-	.DW	0x1414
-	.DW	0x1515
-	.DW	0x1716
-	.DW	0x1818
-	.DW	0x1A19
-	.DW	0x1C1B
-	.DW	0x1D1D
-	.DW	0x1F1E
-	.DW	0x2020
-	.DW	0x2121
-	.DW	0x2222
-	.DW	0x2423
-	.DW	0x2525
-	.DW	0x2726
-	.DW	0x2828
-	.DW	0x2A29
-	.DW	0x2C2B
-	.DW	0x2D2D
-	.DW	0x2F2E
-	.DW	0x3030
-	.DW	0x3131
-	.DW	0x3232
-	.DW	0x3433
-	.DW	0x3535
-	.DW	0x3736
-	.DW	0x3838
-	.DW	0x3939
-	.DW	0x3B3A
-	.DW	0x3C3C
-	.DW	0x3E3D
-	.DW	0x403F
-	.DW	0x4342
-	.DW	0x4444
-	.DW	0x4645
-	.DW	0x4747
-	.DW	0x4948
-	.DW	0x4A4A
-	.DW	0x4C4B
-	.DW	0x4E4D
-	.DW	0x504F
-	.DW	0x5251
-	.DW	0x5453
-	.DW	0X5655
-	.DW	0x5857
-	.DW	0x5A59
-	.DW	0x5C5B
-	.DW	0x5F5E
-	.DW	0x6160
-	.DW	0x6462
-	.DW	0x6564
-	.DW	0x6766
-	.DW	0x6A68
-	.DW	0x6D6B
-	.DW	0x6F6E
-	.DW	0x7370
-	.DW	0x7573
-	.DW	0x7877
-	.DW	0x7B7A
-	.DW	0x7E7D
-	.DW	0x807F
-	.DW	0x8382
-	.DW	0x8785
-	.DW	0x8988
-	.DW	0x8E8C
-	.DW	0x9190
-	.DW	0x9493
-	.DW	0x9896
-	.DW	0x9C9A
-	.DW	0xA09E
-	.DW	0xA4A2
-	.DW	0xA8A6
-	.DW	0xAEAB
-	.DW	0xB3B1
-	.DW	0xB8B6
-	.DW	0xBBBA
-	.DW	0xBFBD
-	.DW	0xC3C1
-	.DW	0xC9C6
-	.DW	0xCECC
-	.DW	0xD3D1
-	.DW	0xD9D6
-	.DW	0xE0DD
-	.DW	0xE5E3
-	.DW	0xEBE8
-	.DW	0xF0EE
-	.DW	0xF4F2
-	.DW	0xF9F6
-	.DW	0xFFFC
-
-.else	; USE_ORIGINAL_TAB_VCA
-; polynom y = a	+ bx + cx2 + dx3
-; ...with coefficients…
+;
+; polynomial y = a	+ bx + cx2 + dx3
+; with coefficients…
 ;    a  0
-;    b  0,210841569
-;    c  0,000177823
-;    d  1,14E-05
+;    b  0.210841569
+;    c  0.000177823
+;    d  1.14E-05
 ; base on these pairs from the above table
 ;   x: 0  96  192  255
 ;   y: 0  32  128  255
@@ -1492,7 +1376,15 @@ TAB_VCA:
 	.db	201, 203, 206, 208, 210, 212, 214, 217		; 232
 	.db	219, 221, 224, 226, 228, 231, 233, 235		; 240
 	.db	238, 240, 243, 245, 247, 250, 252, 255		; 248
-.endif	; USE_ORIGINAL_TAB_VCA
+
+;-----------------------------------------------------------------------------
+;
+; Limit maximum resonance when filter cutoff is extremely low
+;
+
+TAB_REZ:
+	.db	224, 224, 224, 224, 224, 224, 224, 224		;   0 - Low value of DE
+	.db	224, 228, 232, 236, 240, 244, 248, 252		;   8 - High value of FC
 
 ;-----------------------------------------------------------------------------
 ;
@@ -1547,45 +1439,6 @@ TAB_VOLUME:
 	.db	239, 241, 243, 246, 248, 250, 253, 255		; 248
 
 .endif	; USE_MASTER_VOLUME
-
-.if !USE_BANDLIMITED_DCO_A || !USE_BANDLIMITED_DCO_B
-sin_table:
-	.db	  0,   0,   0,   0,     0,   0,   0,   0
-	.db	  0,   0,   0,   1,     1,   1,   1,   2
-	.db	  2,   2,   3,   3,     3,   4,   4,   5
-	.db	  5,   5,   6,   6,     7,   8,   8,   9
-	.db	  9,  10,  10,  11,    12,  12,  13,  14
-	.db	 15,  15,  16,  17,    18,  19,  19,  20
-	.db	 21,  22,  23,  24,    25,  26,  27,  28
-	.db	 29,  30,  31,  32,    33,  34,  35,  36
-
-	.db	 37,  38,  39,  40,    42,  43,  44,  45
-	.db	 46,  48,  49,  50,    51,  53,  54,  55
-	.db	 56,  58,  59,  60,    62,  63,  64,  66
-	.db	 67,  69,  70,  71,    73,  74,  76,  77
-	.db	 79,  80,  81,  83,    84,  86,  87,  89
-	.db	 90,  92,  93,  95,    96,  98,  99, 101
-	.db	103, 104, 106, 107,   109, 110, 112, 113
-	.db	115, 117, 118, 120,   121, 123, 124, 126
-
-	.db	128, 129, 131, 132,   134, 135, 137, 138
-	.db	140, 142, 143, 145,   146, 148, 149, 151
-	.db	152, 154, 156, 157,   159, 160, 162, 163
-	.db	165, 166, 168, 169,   171, 172, 174, 175
-	.db	176, 178, 179, 181,   182, 184, 185, 186
-	.db	188, 189, 191, 192,   193, 195, 196, 197
-	.db	199, 200, 201, 202,   204, 205, 206, 207
-	.db	209, 210, 211, 212,   213, 215, 216, 217
-
-	.db	218, 219, 220, 221,   222, 223, 224, 225
-	.db	226, 227, 228, 229,   230, 231, 232, 233
-	.db	234, 235, 236, 236,   237, 238, 239, 240
-	.db	240, 241, 242, 243,   243, 244, 245, 245
-	.db	246, 246, 247, 247,   248, 249, 249, 250
-	.db	250, 250, 251, 251,   252, 252, 252, 253
-	.db	253, 253, 254, 254,   254, 254, 255, 255
-	.db	255, 255, 255, 255,   255, 255, 255, 255
-.endif	;  !USE_BANDLIMITED_DCO_A || !USE_BANDLIMITED_DCO_B
 
 ;-----------------------------------------------------------------------------
 ;
@@ -1650,7 +1503,7 @@ TIM2_CMP:
 ;	Freq = 440 * 2 ^ ((n - 69 + d) / 12)
 ;	where in turn:
 ;	n = MIDI note number. Range limited to 36 to 96 (5 octaves)
-;	d = transponse/detune (in halftones)
+;	d = transpose/detune (in halftones)
 ;
 ;-----------------------------------------------------------------------------
 
@@ -1695,7 +1548,6 @@ NGEN_NOXOR:
 
 ; -------------
 CALC_DCOA:
-.if USE_BANDLIMITED_DCO_A
 	mov	r17, PHASEA_2		; sawtooth ramp for OSCA
 	sbrs	r23, SW_OSCA_WAVE	; 0/1 (DCO A = saw/pwm)
 	rjmp	DCOA_SAW
@@ -1710,53 +1562,7 @@ CALC_DCOA:
 	sbrs	r23, SW_ANTI_ALIAS
 	rjmp	RAW_PULSE		; Calculate raw pulse/PWM when anti-alias switch is off
 .endif	; USE_ORIGINAL_RAW_OSC
-.if USE_ORIGINAL_WAVETABLES
-	lds	r22, WAVETABLE		; Offset to the correct wavetable, based on note number (0..15)
-.else	; USE_ORIGINAL_WAVETABLES
 	lds	r22, WAVETABLE_A	; Offset to the correct wavetable, based on note number (0..15)
-.endif	; USE_ORIGINAL_WAVETABLES
-.if USE_ORIGINAL_BANDLIMITED_PWM
-; r17 phase
-; r20 pulse width
-; r22 wavetable
-	; get sample a into r17
-	ldi	ZL, low(2*INV_SAW0)	; Load low part of byte address into ZL
-	ldi	ZH, high(2*INV_SAW0)	; Load high part of byte address into ZH
-	add	ZL, r17			; Offset the wavetable by the ramp phase (i)
-	adc	ZH, r22			; Wavetable 0..15
-	lpm				; Load wave(i) into r0
-
-	; get sample b (inverse ramp) out of phase into r18
-	mov	r16, r20		; Grab a copy of the pulse width
-	add	r16, r17		; Add phase offset for second table (pulse width + original sample)
-	mov	r17, r0			; store previous sample in r17
-	ldi	ZL, low (2*SAW_LIMIT0)	; Load low part of byte address into ZL
-	ldi	ZH, high(2*SAW_LIMIT0)	; Load high part of byte address into ZH
-	add	ZL, r16			; Add phase offset for second table.
-	adc	ZH, r22			; Wavetable 0..15
-	lpm				; Load wave(i) into r0
-
-	; xyzzy 16-bit result when calculating wave a+b to ensure that we don't overflow
-	clr	r16
-	add	r17, r0			; wave a+b, store in r16:r17
-	adc	r16, ZERO
-	add	r17, r20		; offset the sample amplitude by wave b offset to counter amplitude shift
-	adc	r16, ZERO
-	; Subtract offset
-	subi	r17, $FF		; remove byte offset to bring the value back to single byte range
-	sbc	r16, ZERO
-	brcc	PULSE_BOUND_CHECK	; non-negative result, so no need to limit the value
-	ldi	r17, 0
-	ldi	r16, 0			; value was negative, so force to zero
-PULSE_BOUND_CHECK:
-	tst	r16			; Check if we're larger than 255
-	breq	PWM_EXIT		; no need to limit upper bound
-	ldi	r17, $FF
-PWM_EXIT:
-	subi	r17, $80		; sign the result
-	rjmp	CALC_DCOB
-
-.else	; USE_ORIGINAL_BANDLIMITED_PWM
 ; r17 phase
 ; r20 pulse width
 ; r22 wavetable
@@ -1767,7 +1573,7 @@ PWM_EXIT:
 	adc	ZH, r22			; Wavetable 0..15
 	lpm				; Load wave(i) into r17
 
-	; get sample b (inverse ramp) out of phase into r18
+	; get sample b out of phase into r18
 	mov	r16, r20		; Grab a copy of the pulse width
 	add	r16, r17		; Add phase offset for second table (pulse width + original sample)
 	mov	r17, r0			; store previous sample in r17
@@ -1777,9 +1583,10 @@ PWM_EXIT:
 	adc	ZH, r22			; Wavetable 0..15
 	lpm				; Load wave(i) into r0
 
-	; subtract wave a-b		; first part b > a, second part b < a
+	; subtract wave a-b
+	; first part b > a, second part b < a
 	clr	r16
-	sub	r17, r0			;
+	sub	r17, r0
 	sbc	r16, ZERO
 	add	r17, r20		; add offset (pulse width)
 	adc	r16, ZERO
@@ -1793,7 +1600,6 @@ PULSE_BOUND_CHECK:
 PWM_EXIT:
 	subi	r17, $80		; sign the result
 	rjmp	CALC_DCOB
-.endif	; USE_ORIGINAL_BANDLIMITED_PWM
 
 .if USE_ORIGINAL_RAW_OSC
 ; Raw Pulse wave generated on the fly. Aliases like crazy (calc'd only when anti-alias switch is OFF)
@@ -1817,11 +1623,7 @@ DCOA_SAW:
 	rjmp	DCOA_SAW_SIGN
 .endif	; USE_ORIGINAL_RAW_OSC
 
-.if USE_ORIGINAL_WAVETABLES
-	lds	r22, WAVETABLE		; Offset to the correct wavetable, based on note number (0..15)
-.else	; USE_ORIGINAL_WAVETABLES
 	lds	r22, WAVETABLE_A	; Offset to the correct wavetable, based on note number (0..15)
-.endif	; USE_ORIGINAL_WAVETABLES
 	ldi	ZL, low(2*INV_SAW0)	; Load low part of byte address into ZL
 	ldi	ZH, high(2*INV_SAW0)	; Load high part of byte address into ZH
 	add	ZL, r17			; Offset the wavetable by the ramp phase (i)
@@ -1834,79 +1636,12 @@ DCOA_SAW:
 .endif	; MEEBLIP_SE_ORIGINAL_CODE
 DCOA_SAW_SIGN:
 	subi	r17, $80		; -127..127 Sign oscillator
-
-; -------------
-.else ; USE_BANDLIMITED_DCO_A
-;
-; switches
-;   PATCH_SWITCH2.7	SW_OSCA_WAVE:  0=SAW, 1=SQU
-;   PATCH_SWITCH2.5	SW_OSCA_NOISE: (noise)
-;
-;   PATCH_SWITCH4.0	SW_OSCA_WAVE_EXT: 0=normal squ or SAW, 1=extended pwm or tri
-;   PATCH_SWITCH4.1	SW_OSCA_WAVE_SIN: 0=normal, 1=sine
-
-	lds	R30, PATCH_SWITCH3
-	lds	R31, PATCH_SWITCH4
-
-	mov	r17, PHASEA_2		; sawtooth ramp for OSCA
-	sbrc	r31, SW_OSCA_WAVE_SIN	; b1 = OSC A wave: 0=normal, 1=sine
-	rjmp	DCOA_SIN		; do sine
-	sbrs	r23, SW_OSCA_WAVE	; b1 = wave A: 0=saw, 1=squ
-	rjmp	DCOA_TRI_SAW		; do tri or saw
-; pwm or squ
-	sbrs	r23, SW_PWM_SWEEP
-	lds	r22, PULSE_KNOB_LIMITED	; PWM Sweep switch is off, so load the knob value as PWM width
-	sbrc	r23, SW_PWM_SWEEP
-	lds	r22, PULSE_WIDTH	; PWM Sweep switch is on, load pulse width from LF02
-	sbrs	r31, SW_OSCA_WAVE_EXT	; b0 = OSC A wave: 0=normal squ, 1=extended pwm
-	ldi	r22, 128		; pwm treshold for squ
-	cp	r17, r22
-	brlo	PULSE_ZERO_A
-	ldi	r17, 255		; sqr = 1
-	rjmp	DCOA_DONE
-PULSE_ZERO_A:
-	ldi	r17, 0			; sqr = 0
-	rjmp	DCOA_DONE
-
-DCOA_TRI_SAW:
-	sbrs	r31, SW_OSCA_WAVE_EXT	; b0 = OSC A wave: 0=normal SAW, 1=extended tri
-	rjmp	DCOA_DONE		; do saw
-
-DCOA_SIN:
-; triangle
-	mov	r22, PHASEA_1
-	sbrc	r17, 7
-	com	r22
-	sbrc	r17, 7
-	com	r17
-	lsl	r22
-	rol	r17
-	sbrs	r31, SW_OSCA_WAVE_SIN	; b1 = OSC A wave: 0=normal, 1=sin
-	rjmp	DCOA_DONE		; do tri
-; sin converter
-; get 8bit value from a 256 entry table
-	ldi	ZL, LOW( sin_table<<1)
-	ldi	ZH, HIGH( sin_table<<1)
-	add	ZL, r17
-	adc	ZH, ZERO
-	; get value from wavetable
-	lpm	r17, z
-DCOA_DONE:
-	subi	r17, $80		; -127..127 Sign oscillator
-.endif ; USE_BANDLIMITED_DCO_A
-
 ; r17 hold DCO A waveform
-
 
 ; -------------
 ;Calculate DCO B
-.if USE_BANDLIMITED_DCO_B
 CALC_DCOB:
-.if USE_ORIGINAL_WAVETABLES
-	lds	r22, WAVETABLE		; Offset to the correct wavetable, based on note number (0..15)
-.else	; USE_ORIGINAL_WAVETABLES
 	lds	r22, WAVETABLE_B	; Offset to the correct wavetable, based on note number (0..15)
-.endif	; USE_ORIGINAL_WAVETABLES
 .if USE_ORIGINAL_RAW_OSC
 	sbrs	r23, SW_ANTI_ALIAS
 	ldi	r22, 0			; Use wavetable 0 when anti-alias switch off
@@ -1939,66 +1674,6 @@ LIMITED_TRIB:				; Triangle wave lookup
 .else	; MEEBLIP_SE_ORIGINAL_CODE
 	lpm	r16, z
 .endif	; MEEBLIP_SE_ORIGINAL_CODE
-
-; -------------
-.else ; USE_BANDLIMITED_DCO_B
-;
-; switches
-;   PATCH_SWITCH2.3	SW_OSCB_WAVE:   0=SAW, 1=SQU
-;   PATCH_SWITCH1.2	SW_OSCB_ENABLE: 0=off, 1=on
-;
-;   PATCH_SWITCH4.2	SW_OSCB_WAVE_EXT: 0=normal SQU or SAW, 1=extended pwm or tri
-;   PATCH_SWITCH4.3	SW_OSCB_WAVE_SIN: 0=normal, 1=sin
-
-CALC_DCOB:
-	lds	R31, PATCH_SWITCH4
-
-	mov	r16, PHASEB_2		; sawtooth ramp for OSCB
-	sbrc	r31, SW_OSCB_WAVE_SIN	; b3 = OSC B wave: 0=normal, 1=sin
-	rjmp	DCOB_SIN		; do sin
-	sbrs	r23, SW_OSCB_WAVE	; b2 = wave A: 0=SAW, 1=SQU
-	rjmp	DCOB_TRI_SAW		; do tri or saw
-; pwm or squ
-	sbrs	r23, SW_PWM_SWEEP
-	lds	r22, PULSE_KNOB_LIMITED	; PWM Sweep switch is off, so load the knob value as PWM width
-	sbrc	r23, SW_PWM_SWEEP
-	lds	r22, PULSE_WIDTH	; PWM Sweep switch is on, load pulse width from LF02
-	sbrs	r31, SW_OSCB_WAVE_EXT	; b2 = OSC B wave: 0=normal SQU, 1=extended pwm
-	ldi	r22, 128		; pwm treshold for squ
-	cp	r16, r22
-	brlo	PULSE_ZERO_B
-	ldi	r16, 255		; sqr = 1
-	rjmp	DCOB_DONE
-PULSE_ZERO_B:
-	ldi	r16, 0			; sqr = 0
-	rjmp	DCOB_DONE
-
-DCOB_TRI_SAW:
-	sbrs	r31, SW_OSCB_WAVE_EXT	; b2 = OSC B wave: 0=normal SAW, 1=extended tri
-	rjmp	DCOB_DONE		; do saw
-
-DCOB_SIN:
-; triangle
-	mov	r22, PHASEB_1
-	sbrc	r16, 7
-	com	r22
-	sbrc	r16, 7
-	com	r16
-	lsl	r22
-	rol	r16
-	sbrs	r31, SW_OSCB_WAVE_SIN	; b3 = OSC B wave: 0=normal, 1=sin
-	rjmp	DCOB_DONE		; do tri
-; sin converter
-; get 8bit value from a 256 entry table
-	ldi	ZL, LOW( sin_table<<1)
-	ldi	ZH, HIGH( sin_table<<1)
-	add	ZL, r16
-	adc	ZH, ZERO
-	; get value from wavetable
-	lpm	r16, z
-DCOB_DONE:
-.endif ; USE_BANDLIMITED_DCO_B
-
 ; r16 hold DCO B waveform
 
 CALC_DIST:
@@ -2008,8 +1683,8 @@ CALC_DIST:
 	eor	r17, r16
 
 					; Turn off OSCB if not enabled
-	sbrs	r23, SW_OSCB_ENABLE
-	ldi	r16, 0
+;	sbrs	r23, SW_OSCB_ENABLE
+;	ldi	r16, 0
 
 ;-----------------------------------------------------------------------------
 ; Sum Oscillators
@@ -2017,6 +1692,10 @@ CALC_DIST:
 ; Combines DCOA (in r17) and DCOB (in r16) waves to produce a 16-bit signed result in HDAC:LDAC (r17:r16)
 ;
 ;-----------------------------------------------------------------------------
+
+.if USE_ORIGINAL_DCO_FM
+	sts	WAVEB,r16		; store signed DCO B wave for fm
+.endif	; USE_ORIGINAL_DCO_FM
 
 .if USE_RINGMODULATOR
 	lds	r22, PATCH_SWITCH3
@@ -2026,21 +1705,17 @@ CALC_DIST:
 
 .if USE_ORIGINAL_MIXER
 ; mixer:
-; Mixer out = (A/2 + B/2)/4
-	ldi	r22, $80		; DCOA_LEVEL = 0.5 (128)
+; Mixer out = (A*x + B*(1-x))/4   x=0..1
+	ldi	r22, $7f		; DCOA_LEVEL = 0.5 (128)
 	mulsu	r17, r22		; signed DCO A wave * level
 	movw	r30, r0			; store value in temp register
-	ldi	r22, $80		; DCOB_LEVEL = 0.5 (128)
-.if USE_OSCBOFF_LEVEL_CORRECTION
-	sbrc	r23, SW_OSCB_ENABLE	; if OSC B disabled add OSC A twice
-.endif	; USE_OSCBOFF_LEVEL_CORRECTION
+	sbrs	r23, SW_OSCB_ENABLE	; if OSC B disabled add OSC A twice
+	mov	r16, r17		; (A*x + A*(1-x))/4   x=0..1
 	mulsu	r16, r22		; signed DCO B wave * level
 	add	r30, r0
 	adc	r31, r1			; sum scaled waves
-.if USE_ORIGINAL_DCO_FM
-	sts	WAVEB,r16		; store signed DCO B wave for fm
-.endif	; USE_ORIGINAL_DCO_FM
 	movw	r16, r30		; place signed output in HDAC:LDAC
+
 	; rotate right a couple of times to make a couple of bits of headroom for resonance.
 	asr	r17			;\
 	ror	r16			;/ r17:r16 = r17:r16 asr 1
@@ -2051,19 +1726,14 @@ CALC_DIST:
 	movw	OSC_OUT_L, r16		; keep a copy for highpass filter
 
 .else ; USE_ORIGINAL_MIXER
-.if USE_ORIGINAL_DCO_FM
-	sts	WAVEB,r16		; store signed DCO B wave for fm
-.endif	; USE_ORIGINAL_DCO_FM
 ; mixer:
 ; Mixer out = (A*x + B*(1-x))/4   x=0..1
 	lds	r22, DCOA_LEVEL		; x=0..254/256
 	mulsu	r17, r22		; signed DCO A wave * level
 	movw	r30, r0			; store value in temp register
 	lds	r22, DCOB_LEVEL		; (1-x)=254/256..0
-.if USE_OSCBOFF_LEVEL_CORRECTION
 	sbrs	r23, SW_OSCB_ENABLE	; if OSC B disabled add OSC A twice
 	mov	r16, r17		; (A*x + A*(1-x))/4   x=0..1
-.endif	; USE_OSCBOFF_LEVEL_CORRECTION
 	mulsu	r16, r22		; signed DCO B wave * level
 	add	r30, r0
 	adc	r31, r1			; sum scaled waves
@@ -2165,7 +1835,7 @@ OVERFLOW_1:				;when overflow is clear
 					;now calc q*(a-b)
 .if USE_ORIGINAL_Q_CALC
 					; Scale resonance based on filter cutoff
-	lds	r22, RESONANCE
+	lds	r22, SCALED_RESONANCE
 	lds	r20, LPF_I		;load 'F' value
 	ldi	r21, 0xff
 
@@ -2177,7 +1847,6 @@ OVERFLOW_1:				;when overflow is clear
 	sub	r22, r21		; q = Q-f = Q-(1-F/2)+32 = Q+F/2+32-1/2
 	brcc	OVERFLOW_2		; if no overflow occured
 	ldi	r22, 0x00		;0x00 because of unsigned
-
 OVERFLOW_2:
 .else	; USE_ORIGINAL_Q_CALC
 	lds	r22, SCALED_RESONANCE	;load filter Q value, unsigned
@@ -2185,18 +1854,13 @@ OVERFLOW_2:
 
 	mov	r20, a_L		;\
 	mov	r21, a_H		;/ load 'a' , signed
-
 	lds	z_H, b_H		;\
 	lds	z_L, b_L		;/ load 'b', signed
-
 	sub	r20, z_L		;\
 	sbc	r21, z_H		;/ (a-b) signed
-
 	brvc	OVERFLOW_3		;if overflow is clear jump to OVERFLOW_3
-
 					;0b1000.0000 0b0000.0001 -> min
 					;0b0111.1111 0b1111.1111 -> max
-
 	ldi	r20, 0b00000001
 	ldi	r21, 0b10000000
 
@@ -2205,10 +1869,15 @@ OVERFLOW_3:
 	lds	r18, PATCH_SWITCH1	; Check Low Pass/High Pass panel switch.
 	sbrs	r18, SW_FILTER_MODE
 	rjmp	CALC_LOWPASS
+SKIP_REZ:
 	movw	z_L,r20			; High Pass selected, so just load r21:r20 into z_H:z_L to disable Q
 	rjmp	DCF_ADD			; Skip lowpass calc
 
 CALC_LOWPASS:
+	; skip resonance calculation if VCF is turned off (value of 0)
+	lds	r18, VCF_STATUS
+	tst	r18
+	breq	SKIP_REZ
 					; mul signed:unsigned -> (a-b) * q
 					; 16x8 into 16-bit
 					; r19:r18 = r21:r20 (ah:al) * r22 (b)
@@ -2225,9 +1894,11 @@ NO_ROUND:
 	clc				; (a-b) * q * 4
 	lsl	r18
 	rol	r19
+OVERFLOW_3A:
 	clc
 	lsl	r18
 	rol	r19
+OVERFLOW_3B:
 	movw	z_L,r18			;q*(a-b) in z_H:z_L as signed
 
 					;add both
@@ -2278,17 +1949,10 @@ NO_ROUND2:
 	brvc	OVERFLOW_5		;if overflow is clear
 					;0b1000.0000 0b0000.0001 -> min
 					;0b0111.1111 0b1111.1111 -> max
-.if MEEBLIP_SE_ORIGINAL_CODE
-	ldi	z_H, 0b11111111
-	ldi	z_L, 0b01111111
-	mov	a_L, z_H
-	mov	a_H, z_L
-.else	; MEEBLIP_SE_ORIGINAL_CODE
 	ldi	z_L, 0b11111111
 	ldi	z_H, 0b01111111
 	mov	a_L, z_L
 	mov	a_H, z_H
-.endif	; MEEBLIP_SE_ORIGINAL_CODE
 
 OVERFLOW_5:
 					;calculated a+=f*((in-a)+q*(a-b)) as signed value and saved in a_H:a_L
@@ -2364,36 +2028,11 @@ OVERFLOW_7:
 ; Digitally Controlled Amplifier
 ;
 ; Multiply the output waveform by the 8-bit value in LEVEL.
+; r17:r16 - output from filter 16b signed
+; r18     - output from DCA envelope generator
 ;-----------------------------------------------------------------------------
 ;
-
 DCA:
-.if USE_ORIGINAL_DCA
-	ldi	r30, 0
-	ldi	r31, 0
-	lds	r18, LEVEL
-	cpi	r18, 255
-	brne	T2_ACHECK		; multiply when LEVEL!=255
-	mov	r30, r16
-	mov	r31, r17
-	rjmp	T2_AEXIT
-
-T2_ALOOP:				; multiply 16 bit (sample) with 8 bit (level)
-	asr	r17			;\
-	ror	r16			;/ r17:r16 = r17:r16 asr 1
-	lsl	r18			; Cy <-- r31 <-- 0
-	brcc	T2_ACHECK
-	add	r30, r16
-	adc	r31, r17
-
-T2_ACHECK:
-	tst	r18
-	brne	T2_ALOOP
-
-T2_AEXIT:
-.else	; USE_ORIGINAL_DCA
-; r17:r16 output from filter 16b signed
-; r18     output from DCA envelop generator
 	movw	r30, r16
 	lds	r18, LEVEL
 	cpi	r18, 255
@@ -2404,7 +2043,6 @@ T2_AEXIT:
 	add	r30, r1
 	adc	r31, ZERO
 T2_AEXIT:
-.endif	; USE_ORIGINAL_DCA
 .else	; !SKIP_AMP
 	movw	r30, r16
 .endif	;  !SKIP_AMP
@@ -2800,12 +2438,12 @@ INTRX_S4:
 	cpi	r17, 4
 	brne	INTRX_S5
 	bld	r26, SW_SUSTAIN		; Set bit in PATCH_SWITCH2
-.if !USE_ORIGINAL_ENVELOP_CONTROL
+.if !USE_ORIGINAL_ENVELOPE_CONTROL
 ; set update_env_dca & update_env_dcf flags
 	lds	r27, MIDI_TASK_UPDATE
 	ori	R27, (1<<UPDATE_ENV_DCF) | (1<< UPDATE_ENV_DCA)
 	sts	MIDI_TASK_UPDATE, r27
-.endif	; !USE_ORIGINAL_ENVELOP_CONTROL
+.endif	; !USE_ORIGINAL_ENVELOPE_CONTROL
 
 	rjmp	INTRX_SEXIT
 INTRX_S5:
@@ -2897,7 +2535,7 @@ INTRX_SWITCH4:
 INTRX_SW41:
 	cpi	r17, 1
 	brne	INTRX_SW42
-	bld	r26, SW_OSCA_WAVE_SIN	; Set bit in PATCH_SWITCH4
+	bld	r26, SW_USER_4_1	; Set bit in PATCH_SWITCH4
 	rjmp	INTRX_SW4EXIT
 INTRX_SW42:
 	cpi	r17, 2
@@ -2907,7 +2545,7 @@ INTRX_SW42:
 INTRX_SW43:
 	cpi	r17, 3
 	brne	INTRX_SW44
-	bld	r26, SW_OSCB_WAVE_SIN	; Set bit in PATCH_SWITCH4
+	bld	r26, SW_USER_4_3	; Set bit in PATCH_SWITCH4
 	rjmp	INTRX_SW4EXIT
 INTRX_SW44:
 	cpi	r17, 4
@@ -2997,7 +2635,7 @@ INTRX_SAVE:
 .if USE_EXTENDED_MIDI_CONTROL
 ; for some midi controllers do a special processing
 
-.if !USE_ORIGINAL_ENVELOP_CONTROL
+.if !USE_ORIGINAL_ENVELOPE_CONTROL
 	cpi	r17, $16
 	brlo	INTRX_CCLOW
 	breq	INTRX_AMP_ATTACK
@@ -3089,8 +2727,6 @@ INTRX_CCEND:
 	pop	r27			; reload old contents of r27 and r 26
 	pop	r26
 	rjmp	INTRX_EXIT
-
-;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 ;Ex pitch bender:
 INTRX_PBEND:
@@ -3271,84 +2907,6 @@ MUL8X8U:
 	movw	r16,r0
 	ret
 
-.if USE_ORIGINAL_MUL8X8S
-;-----------------------------------------------------------------------------
-;8 bit x 8 bit multiplication (signed)
-;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-;In:	r16 = x			-128..+127
-;	r17 = y			0,000..0,996
-;Out:	r17,r16 = x * y		-127,500..+126,504
-;Used:	SREG,r18-r20
-;-----------------------------------------------------------------------------
-MUL8X8S:
-	bst	r16, 7			; T = sign: 0=plus, 1=minus
-	sbrc	r16, 7			;\
-	neg	r16			;/ r16 = abs(r16) 0..128
-	mul	r16, r17
-	movw	r16,r0			; r17,r16 = LFO * LFOMOD
-	brtc	M8X8S_EXIT		; exit if x >= 0
-	com	r16			;\
-	com	r17			; \
-	sec				;  > r17:r16 = -r17:r16
-	adc	r16, ZERO		; /
-	adc	r17, ZERO		;/
-
-M8X8S_EXIT:
-	ret
-.endif	; USE_ORIGINAL_MUL8X8S
-
-.if USE_ORIGINAL_MUL32X16
-;-----------------------------------------------------------------------------
-;32 bit x 16 bit multiplication (unsigned)
-;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-;In:	r19:r18:r17:r16 = x		0..2^32-1
-;	r23:r22 = y			0,yyyyyyyyyyyyyyyy  0..0,9999847
-;Out:	r19:r18:r17:r16 = x * y		0..2^32-1
-;Used:	SREG,r20-r29
-;-----------------------------------------------------------------------------
-MUL32X16:
-	push	r30
-	clr	r20			;\
-	clr	r21			;/ XX = x
-	clr	r24			;\
-	clr	r25			; \
-	clr	r26			;  \
-	clr	r27			;  / ZZ = 0
-	clr	r28			; /
-	clr	r29			;/
-	rjmp	M3216_CHECK
-
-M3216_LOOP:
-	lsr	r23			;\
-	ror	r22			;/ y:Carry = y >> 1
-	brcc	M3216_SKIP
-	add	r24,r16			;\
-	adc	r25,r17			; \
-	adc	r26,r18			;  \
-	adc	r27,r19			;  / ZZ = ZZ + XX
-	adc	r28,r20			; /
-	adc	r29,r21			;/
-
-M3216_SKIP:
-	lsl	r16			;\
-	rol	r17			; \
-	rol	r18			;  \
-	rol	r19			;  / YY = YY << 1
-	rol	r20			; /
-	rol	r21			;/
-
-M3216_CHECK:
-	mov	r30,r22			;\
-	or	r30,r23			;/ check if y == 0
-	brne	M3216_LOOP
-	mov	r16,r26			;\
-	mov	r17,r27			; \
-	mov	r18,r28			; / x * y
-	mov	r19,r29			;/
-	pop	r30
-	ret
-
-.else	; USE_ORIGINAL_MUL32X16
 ;-----------------------------------------------------------------------------
 ;32 bit x 16 bit multiplication (unsigned)
 ;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -3396,7 +2954,6 @@ MUL32X16:
 	mov	r19,r29			;/
 
 	ret
-.endif	; USE_ORIGINAL_MUL32X16
 
 ;-----------------------------------------------------------------------------
 ; Load 32 bit phase value from ROM
@@ -3411,24 +2968,10 @@ LOAD_32BIT:
 	adiw	r30, DELTA_C		; Z = ROM address
 	add	r30, r30
 	adc	r31, r31
-.if MEEBLIP_SE_ORIGINAL_CODE
-	lpm
-	mov	r16, r0
-	adiw	r30, 1
-	lpm
-	mov	r17, r0
-	adiw	r30, 1
-	lpm
-	mov	r18, r0
-	adiw	r30, 1
-	lpm
-	mov	r19, r0
-.else	; MEEBLIP_SE_ORIGINAL_CODE
 	lpm	r16, z+
 	lpm	r17, z+
 	lpm	r18, z+
 	lpm	r19, z+
-.endif	; MEEBLIP_SE_ORIGINAL_CODE
 	ret
 
 ;-----------------------------------------------------------------------------
@@ -3502,7 +3045,7 @@ NRC_2:
 ;- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 ;In:	r16 = i		0..255
 ;	r31:r30 = &Tab
-;Out:	r0 = Tab[i]	0..255
+;Out:	r16 = Tab[i]	0..255
 ;Used:	SREG,r30,r31
 ;-----------------------------------------------------------------------------
 TAB_BYTE:
@@ -3510,11 +3053,7 @@ TAB_BYTE:
 	adc	r31, r31		;/ Z = 2 * &Tab
 	add	r30, r16
 	adc	r31, ZERO
-.if MEEBLIP_SE_ORIGINAL_CODE
-	lpm
-.else	; MEEBLIP_SE_ORIGINAL_CODE
 	lpm	r16, z
-.endif	; MEEBLIP_SE_ORIGINAL_CODE
 	ret
 
 ;-----------------------------------------------------------------------------
@@ -3530,16 +3069,8 @@ TAB_WORD:
 	adc	r31, ZERO
 	add	r30, r30		;\
 	adc	r31, r31		;/ Z = 2 * &Tab
-.if MEEBLIP_SE_ORIGINAL_CODE
-	lpm
-	mov	r18, r0			; LSByte
-	adiw	r30, 1			; Z++
-	lpm
-	mov	r19, r0			; MSByte
-.else	; MEEBLIP_SE_ORIGINAL_CODE
 	lpm	r18, z+			; LSByte
 	lpm	r19, z			; MSByte
-.endif	; MEEBLIP_SE_ORIGINAL_CODE
 	ret
 
 ;-----------------------------------------------------------------------------
@@ -3553,13 +3084,8 @@ ADCTORATE:
 	lsr	r16
 	lsr	r16
 	lsr	r16			;0..31
-.if MEEBLIP_SE_ORIGINAL_CODE
-	ldi	r30, TIMETORATE
-	ldi	r31, 0
-.else	; MEEBLIP_SE_ORIGINAL_CODE
 	ldi	r30, low( TIMETORATE)
 	ldi	r31, high(TIMETORATE)
-.endif	; MEEBLIP_SE_ORIGINAL_CODE
 	rcall	TAB_WORD		;r19:r18 = rate
 	clr	r16
 	clr	r17
@@ -3790,31 +3316,19 @@ LD_PATCH_2:
 ; Used:	r16-r20, r28, r29, SREG
 ;-----------------------------------------------------------------------------
 POT_SCAN:
-.if MEEBLIP_SE_ORIGINAL_CODE
-	ldi	r28, KNOB0_STATUS	;
-	add	r28, r20		;
-	ldi	r29, 0			;
-.else	; MEEBLIP_SE_ORIGINAL_CODE
 	ldi	r28, low(KNOB0_STATUS)
 	ldi	r29, high(KNOB0_STATUS)
-	add	r28, r20		;
+	add	r28, r20
 	adc	r29, ZERO
-.endif	; MEEBLIP_SE_ORIGINAL_CODE
 	ld	r18, Y			; load KNOBN_STATUS value into r18
 	sbrc	r18, 0			; Check bit 0
 	rjmp	LOAD_ADC		; KNOBN_STATUS is set, so just update parameter
 	mov	r19, r16
 
-.if MEEBLIP_SE_ORIGINAL_CODE
-	ldi	r28, OLD_ADC_0		;
-	add	r28, r20		;
-	ldi	r29, 0			;
-.else	; MEEBLIP_SE_ORIGINAL_CODE
 	ldi	r28, low(OLD_ADC_0)
 	ldi	r29, high(OLD_ADC_0)
-	add	r28, r20		;
+	add	r28, r20
 	adc	r29, ZERO
-.endif	; MEEBLIP_SE_ORIGINAL_CODE
 	ld	r17, Y			; load OLD_ADC_N value into r17
 	sub	r19, r17
 	brpl	DEAD_CHECK
@@ -3822,18 +3336,11 @@ POT_SCAN:
 DEAD_CHECK:
 	cpi	r19, PARAM_DEAD_ZONE
 	brlo	NO_CHANGE		; Skip ahead if pot change is < the deadzone limit
-
 	sbr	r18,1			; Update knob status bit and continue -- pot moved
-.if MEEBLIP_SE_ORIGINAL_CODE
-	ldi	r28, KNOB0_STATUS	;
-	add	r28, r20		;
-	ldi	r29, 0			;
-.else	; MEEBLIP_SE_ORIGINAL_CODE
 	ldi	r28, low(KNOB0_STATUS)
 	ldi	r29, high(KNOB0_STATUS)
 	add	r28, r20		;
 	adc	r29, ZERO
-.endif	; MEEBLIP_SE_ORIGINAL_CODE
 	st	Y, r18			; save updated KNOBN_STATUS
 	rjmp	LOAD_ADC		;
 
@@ -3893,9 +3400,9 @@ RESET:
 	sts	FMDEPTH, r16		; FM Depth = 0
 .endif	; USE_ORIGINAL_DCO_FM
 
-.if !USE_ORIGINAL_ENVELOP_CONTROL
+.if !USE_ORIGINAL_ENVELOPE_CONTROL
 	sts	MIDI_TASK_UPDATE, r16	; no active task
-.endif	;  !USE_ORIGINAL_ENVELOP_CONTROL
+.endif	;  !USE_ORIGINAL_ENVELOPE_CONTROL
 
 .if USE_EXTENDED_MIDI_CONTROL
 	sts	RESONANCE, r16		; Resonance = 0
@@ -3921,6 +3428,7 @@ RESET:
 	sts	MIDIPBEND_H, r16	;/ P.BEND = 0
 	sts	MIDIMODWHEEL, r16	; MOD.WHEEL = 0
 	sts	KNOB_SHIFT, r16		; Initialize panel shift switch = 0 (unshifted)
+	sts	VCF_STATUS, r16		; Flag VCF as off (0)
 
 	ldi	r16, 2
 	sts	PORTACNT, r16		; PORTACNT = 2
@@ -4140,16 +3648,10 @@ RESET:
 ;store initial pot positions as OLD_ADC values to avoid snapping to new value unless knob has been moved.
 
 	; Store value of Pot ADC0
-.if MEEBLIP_SE_ORIGINAL_CODE
-	ldi	r28, ADC_0		; \
-	add	r28, r18		; / Y = &ADC_i
-	ldi	r29, 0			;/
-.else	;MEEBLIP_SE_ORIGINAL_CODE
 	ldi	r28, low(ADC_0)
 	ldi	r29, high(ADC_0)
 	add	r28, r18
 	adc	r29, ZERO
-.endif	; MEEBLIP_SE_ORIGINAL_CODE
 	rcall	ADC_END			; r16 = AD(i)
 	st	Y, r16			; AD(i) --> ADC_i
 
@@ -4270,11 +3772,11 @@ MAINLOOP:
 	subi	r16, LOW(KBDSCAN)	;\
 	sbci	r17, HIGH(KBDSCAN)	;/ r17:r16 = (t-t0) - 100ms
 	brsh	MLP_SCAN		;\
-.if USE_ORIGINAL_ENVELOP_CONTROL
+.if USE_ORIGINAL_ENVELOPE_CONTROL
 	rjmp	MLP_WRITE		;/ skip scanning if (t-t0) < 100ms
-.else	; USE_ORIGINAL_ENVELOP_CONTROL
+.else	; USE_ORIGINAL_ENVELOPE_CONTROL
 	rjmp	MLP_UPDATE		;/ skip scanning if (t-t0) < 100ms
-.endif	; USE_ORIGINAL_ENVELOP_CONTROL
+.endif	; USE_ORIGINAL_ENVELOPE_CONTROL
 
 MLP_SCAN:
 
@@ -4282,7 +3784,7 @@ MLP_SCAN:
 	lds	r16, SWITCH3
 	tst	r16
 	breq	CONTROL_EXIT		; Set button status: 1=MIDI, 2=SAVE, 4=LOAD
-.if USE_EXTEDEND_BUTTON_FUNCTIONS
+.if USE_EXTENDED_BUTTON_FUNCTIONS
 	lds	r17, BUTTON_STATUS
 	tst	r17
 	breq	MLP_ONEBTN
@@ -4291,7 +3793,7 @@ MLP_SCAN:
 	ori	r16, 0x80		; set bit 7 to indicate we have more then one button pressed
 	or	r16, r17
 MLP_ONEBTN:
-.endif	; USE_EXTEDEND_BUTTON_FUNCTIONS
+.endif	; USE_EXTENDED_BUTTON_FUNCTIONS
 	sts	BUTTON_STATUS, r16	; Set control status to MIDI, turn on control timer
 	ldi	r16, 63
 	sts	LED_TIMER, r16
@@ -4301,17 +3803,17 @@ CONTROL_EXIT:
 	breq	MLP_LED_END		; button hasn't been pressed, so skip
 
 	; flip panel LED state until button timer is finished
-.if !USE_EXTEDEND_BUTTON_FUNCTIONS
+.if !USE_EXTENDED_BUTTON_FUNCTIONS
 	lds	r16, LED_STATUS
-	ldi	r17, 32
-.else	; !USE_EXTEDEND_BUTTON_FUNCTIONS
 	ldi	r17, 64
+.else	; !USE_EXTENDED_BUTTON_FUNCTIONS
+	ldi	r17, 32
 	andi	r16, 0x80
 	breq	MLP_SLOW_LED
 	ldi	r17, 128
 MLP_SLOW_LED:
 	lds	r16, LED_STATUS
-.endif	; !USE_EXTEDEND_BUTTON_FUNCTIONS
+.endif	; !USE_EXTENDED_BUTTON_FUNCTIONS
 	add	r16, r17
 	cpi	r16, $80
 	brlo	MLP_LED_OFF
@@ -4524,12 +4026,12 @@ MLP_BIT4A:
 	bst	r16, 4
 	bld	r18, SW_SUSTAIN
 	ldi	r30, 4			; Flag switch 4 moved
-.if !USE_ORIGINAL_ENVELOP_CONTROL
+.if !USE_ORIGINAL_ENVELOPE_CONTROL
 ; set update_env_dca & update_env_dcf flags
 	lds	r22, MIDI_TASK_UPDATE
 	ori	r22, (1<<UPDATE_ENV_DCF) | (1<< UPDATE_ENV_DCA)
 	sts	MIDI_TASK_UPDATE, r22
-.endif	; !USE_ORIGINAL_ENVELOP_CONTROL
+.endif	; !USE_ORIGINAL_ENVELOPE_CONTROL
 
 MLP_BIT5A:
 	sbrs	r17, 5
@@ -4700,12 +4202,12 @@ MLP_BIT4A:
 	bst	r16, 4
 	bld	REG_PATCH_SWITCH2, SW_SUSTAIN
 	ldi	r30, 4			; Flag switch 4 moved
-.if !USE_ORIGINAL_ENVELOP_CONTROL
+.if !USE_ORIGINAL_ENVELOPE_CONTROL
 ; set update_env_dca & update_env_dcf flags
 	lds	r22, MIDI_TASK_UPDATE
 	ori	r22, (1<<UPDATE_ENV_DCF) | (1<< UPDATE_ENV_DCA)
 	sts	MIDI_TASK_UPDATE, r22
-.endif	; !USE_ORIGINAL_ENVELOP_CONTROL
+.endif	; !USE_ORIGINAL_ENVELOPE_CONTROL
 
 MLP_BIT5A:
 	sbrs	r17, 5
@@ -4761,7 +4263,7 @@ MLP_SW_EXIT:
 	cpi	r17, (1<<SAVE_BUTTON)
 	breq	MLP_SAVE
 
-.if USE_EXTEDEND_BUTTON_FUNCTIONS
+.if USE_EXTENDED_BUTTON_FUNCTIONS
 	andi	r17, 0x7f		; mask out flag for more then one button pressed
 	cpi	r17, (1<<SAVE_BUTTON) | (1<<MIDI_BUTTON)	; extended function set 1
 	breq	MLP_EXTFUNC_11
@@ -4771,7 +4273,7 @@ MLP_SW_EXIT:
 	breq	MLP_EXTFUNC_31
 	cpi	r17, (1<<LOAD_BUTTON)
 	brne	SKIP_CONTROL_SET
-.endif	; USE_EXTEDEND_BUTTON_FUNCTIONS
+.endif	; USE_EXTENDED_BUTTON_FUNCTIONS
 
 MLP_LOAD:
 	dec	r16			; Shift patch offset to 0..15
@@ -4781,12 +4283,12 @@ MLP_LOAD:
 	rcall	LOAD_PATCH		; Fetches the patch correspondng to the control switch number stored in r16
 	rjmp	END_CONTROL_SET		; reset control button
 
-.if USE_READ_ONLY_PATCH_ZERO | USE_EXTEDEND_BUTTON_FUNCTIONS
-SKIP_CONTROL_SET:				; !!! clean up
+.if USE_READ_ONLY_PATCH_ZERO | USE_EXTENDED_BUTTON_FUNCTIONS
+SKIP_CONTROL_SET:				; ! clean up
 	rjmp	SKIP_CONTROL_SET_1
-.endif	; USE_READ_ONLY_PATCH_ZERO | USE_EXTEDEND_BUTTON_FUNCTIONS
+.endif	; USE_READ_ONLY_PATCH_ZERO | USE_EXTENDED_BUTTON_FUNCTIONS
 
-.if USE_EXTEDEND_BUTTON_FUNCTIONS
+.if USE_EXTENDED_BUTTON_FUNCTIONS
 SET_MIDI_CH:
 	rjmp	SET_MIDI_CH_1
 MLP_EXTFUNC_11:
@@ -4795,7 +4297,7 @@ MLP_EXTFUNC_21:
 	rjmp	MLP_EXTFUNC_2
 MLP_EXTFUNC_31:
 	rjmp	MLP_EXTFUNC_3
-.endif	; USE_EXTEDEND_BUTTON_FUNCTIONS
+.endif	; USE_EXTENDED_BUTTON_FUNCTIONS
 
 MLP_SAVE:
 .if USE_READ_ONLY_PATCH_ZERO
@@ -4850,11 +4352,11 @@ MLP_SAVE_1:
 	rcall	CLEAR_KNOB_STATUS
 	rjmp	END_CONTROL_SET		; reset control button
 
-.if !USE_EXTEDEND_BUTTON_FUNCTIONS
+.if !USE_EXTENDED_BUTTON_FUNCTIONS
 SET_MIDI_CH:
-.else	; !USE_EXTEDEND_BUTTON_FUNCTIONS
+.else	; !USE_EXTENDED_BUTTON_FUNCTIONS
 SET_MIDI_CH_1:
-.endif	; !USE_EXTEDEND_BUTTON_FUNCTIONS
+.endif	; !USE_EXTENDED_BUTTON_FUNCTIONS
 					; Set MIDI channel - adjust the panel switches so that channel 16 sets the synth in omni mode
 	inc	r16			; Shift value to 2..17 to make room for omni
 	cpi	r16, 17
@@ -4866,7 +4368,7 @@ NOT_OMNI:
 	ldi	r18, $03
 	ldi	r17, $FF		; Set eeprom address to $03FF (last byte in memory)
 	rcall	EEPROM_WRITE		; Write midi channel# (r16) to eeprom
-.if USE_EXTEDEND_BUTTON_FUNCTIONS
+.if USE_EXTENDED_BUTTON_FUNCTIONS
 	rjmp	END_CONTROL_SET
 MLP_EXTFUNC_1:
 	cpi	r16, 1
@@ -4881,7 +4383,7 @@ MLP_EXTFUNC_1_0:
 MLP_EXTFUNC_2:	; more extended function not implemented
 MLP_EXTFUNC_3:
 
-.endif	; USE_EXTEDEND_BUTTON_FUNCTIONS
+.endif	; USE_EXTENDED_BUTTON_FUNCTIONS
 END_CONTROL_SET:
 	sbi	PORT_MIDI_LED, MIDI_LED; Clear control button parameters and leave the LED on
 	ldi	r16, 0			;
@@ -4890,23 +4392,23 @@ END_CONTROL_SET:
 	sts	LED_TIMER, r16		;
 	sts	CONTROL_SWITCH, r16	;
 
-.if !USE_EXTEDEND_BUTTON_FUNCTIONS & !USE_READ_ONLY_PATCH_ZERO
+.if !USE_EXTENDED_BUTTON_FUNCTIONS & !USE_READ_ONLY_PATCH_ZERO
 SKIP_CONTROL_SET:
-.else	; !USE_EXTEDEND_BUTTON_FUNCTIONS & !USE_READ_ONLY_PATCH_ZERO
+.else	; !USE_EXTENDED_BUTTON_FUNCTIONS & !USE_READ_ONLY_PATCH_ZERO
 SKIP_CONTROL_SET_1:
-.endif	; !USE_EXTEDEND_BUTTON_FUNCTIONS & !USE_READ_ONLY_PATCH_ZERO
+.endif	; !USE_EXTENDED_BUTTON_FUNCTIONS & !USE_READ_ONLY_PATCH_ZERO
 
 ;-----------------------------------------------------------------------------
 ; do some update asks on changed switch flags
 ;-----------------------------------------------------------------------------
 
-.if !USE_ORIGINAL_ENVELOP_CONTROL | USE_MASTER_VOLUME
+.if !USE_ORIGINAL_ENVELOPE_CONTROL | USE_MASTER_VOLUME
 MLP_UPDATE:
 	lds	r22, MIDI_TASK_UPDATE	; are there any open update tasks?
 	tst	r22
 	breq	MLP_UPDATE_DONE
 
-.if !USE_ORIGINAL_ENVELOP_CONTROL
+.if !USE_ORIGINAL_ENVELOPE_CONTROL
 ; check update_env_dcf flag
 	bst	r22, UPDATE_ENV_DCF
 	brtc	MLP_UPD_DCF_SU_END
@@ -4953,7 +4455,7 @@ MLP_UPD_DCA_SU_DONE:
 ; clear update_env_dca flag
 	andi	r22, ~(1<<UPDATE_ENV_DCA)
 MLP_UPD_DCA_SU_END:
-.endif	; USE_ORIGINAL_ENVELOP_CONTROL
+.endif	; USE_ORIGINAL_ENVELOPE_CONTROL
 
 .if USE_MASTER_VOLUME
 	bst	r22, UPDATE_VOLUME
@@ -4972,7 +4474,7 @@ MLP_UPD_VOLUME_END:
 
 	sts	MIDI_TASK_UPDATE, r22
 MLP_UPDATE_DONE:
-.endif	; !USE_ORIGINAL_ENVELOP_CONTROL | USE_MASTER_VOLUME
+.endif	; !USE_ORIGINAL_ENVELOPE_CONTROL | USE_MASTER_VOLUME
 
 
 ;-----------------------------------------------------------------------------
@@ -5084,16 +4586,10 @@ MLP_SKIPSCAN:
 	rcall	ADC_END			; r16 = AD(i)
 	lds	r18, ADC_CHAN		;\
 	sts	PREV_ADC_CHAN, r18	; keep track of which ADC channel we're processing.
-.if MEEBLIP_SE_ORIGINAL_CODE
-	ldi	r28, ADC_0		; \
-	add	r28, r18		; / Y = &ADC_i
-	ldi	r29, 0			;/
-.else	; MEEBLIP_SE_ORIGINAL_CODE
 	ldi	r28, low(ADC_0)
 	ldi	r29, high(ADC_0)
 	add	r28, r18
 	adc	r29, ZERO
-.endif	; MEEBLIP_SE_ORIGINAL_CODE
 	st	Y, r16			; AD(i) --> ADC_i
 
 ;next channel:
@@ -5132,9 +4628,9 @@ CHECK_0:
 EXIT_CHECK_0:
 .if USE_ORIGINAL_RESONANCE_LIMIT
 	lds	r16, RESONANCE		; Limit resonance
-	cpi	r16, 0xf6		;\
+	cpi	r16, 252		;\
 	BRLO	LOAD_REZ		; | Limit maximum knob resonance to 0xf6
-	ldi	r16, 0xf6		;/
+	ldi	r16, 252		;/
 LOAD_REZ:
 	sts	RESONANCE,r16
 .endif	; USE_ORIGINAL_RESONANCE_LIMIT
@@ -5211,15 +4707,15 @@ KNOB_SHIFT_CHECK:
 	brne	CHECK_3
 	rcall	POT_SCAN		; If so, check if parameter should be updated with pot value in r16
 	tst	r17
-.if USE_ORIGINAL_ENVELOP_CONTROL
+.if USE_ORIGINAL_ENVELOPE_CONTROL
 	breq	EXIT_CHECK2A		; Skip update if pot not updated, post-process DCF_DECAY
 	sts	LFOFREQ, r16
 	rjmp	EXIT_CHECK2A
-.else	;USE_ORIGINAL_ENVELOP_CONTROL
+.else	;USE_ORIGINAL_ENVELOPE_CONTROL
 	breq	EXIT_KNOBB		; Skip update if pot hasn't been updated
 	sts	LFOFREQ, r16
 	rjmp	DONE_KNOBS
-.endif	;USE_ORIGINAL_ENVELOP_CONTROL
+.endif	;USE_ORIGINAL_ENVELOPE_CONTROL
 
 CHECK_3:
 	cpi	r20, 3			; Update knob 3, LFO depth?
@@ -5236,15 +4732,15 @@ CHECK_4:
 	brne	CHECK_5
 	rcall	POT_SCAN		; If so, check if parameter should be updated with pot value in r16
 	tst	r17
-.if USE_ORIGINAL_ENVELOP_CONTROL
+.if USE_ORIGINAL_ENVELOPE_CONTROL
 	breq	EXIT_CHECK4A		; Skip update if pot hasn't been updated(post process AMP_DECAY parameters)
 	sts	VCFENVMOD, r16
 	rjmp	EXIT_CHECK4A
-.else	; USE_ORIGINAL_ENVELOP_CONTROL
+.else	; USE_ORIGINAL_ENVELOPE_CONTROL
 	breq	EXIT_KNOBB		; Skip update if pot hasn't been updated
 	sts	VCFENVMOD, r16
 	rjmp	DONE_KNOBS
-.endif	; USE_ORIGINAL_ENVELOP_CONTROL
+.endif	; USE_ORIGINAL_ENVELOPE_CONTROL
 
 CHECK_5:
 	cpi	r20, 5			; Update knob 5, Glide/Portamento?
@@ -5269,7 +4765,7 @@ CHECK_2A:
 	brne	CHECK_3A
 	rcall	POT_SCAN		; If so, check if parameter should be updated with pot value in r16
 	tst	r17
-.if USE_ORIGINAL_ENVELOP_CONTROL
+.if USE_ORIGINAL_ENVELOPE_CONTROL
 	breq	EXIT_CHECK2A		; Skip update if pot hasn't been updated
 	sts	KNOB_DCF_DECAY, r16
 EXIT_CHECK2A:
@@ -5289,7 +4785,7 @@ SUSTAIN_OFF:
 	sts	DECAYTIME2, r16		; Set decay time to value of decay knob
 	sts	RELEASETIME2, r16	; Set release time to value of decay knob
 	rjmp	DONE_KNOBS
-.else	; USE_ORIGINAL_ENVELOP_CONTROL
+.else	; USE_ORIGINAL_ENVELOPE_CONTROL
 	breq	DONE_KNOBS		; Skip update if pot hasn't been updated
 	sts	KNOB_DCF_DECAY, r16
 ; set update_env_dcf flags
@@ -5297,7 +4793,7 @@ SUSTAIN_OFF:
 	ori	r16, (1<<UPDATE_ENV_DCF)
 	sts	MIDI_TASK_UPDATE, r16
 	rjmp	DONE_KNOBS
-.endif	; USE_ORIGINAL_ENVELOP_CONTROL
+.endif	; USE_ORIGINAL_ENVELOPE_CONTROL
 
 CHECK_3A:
 	cpi	r20, 3			; Update knob 3^, Filter attack?
@@ -5306,9 +4802,9 @@ CHECK_3A:
 	tst	r17
 	breq	DONE_KNOBS		; Skip update if pot hasn't been updated
 	sts	KNOB_DCF_ATTACK, r16
-.if !USE_ORIGINAL_ENVELOP_CONTROL
+.if !USE_ORIGINAL_ENVELOPE_CONTROL
 	sts	ATTACKTIME2, r16
-.endif	; !USE_ORIGINAL_ENVELOP_CONTROL
+.endif	; !USE_ORIGINAL_ENVELOPE_CONTROL
 	rjmp	DONE_KNOBS
 
 CHECK_4A:
@@ -5316,7 +4812,7 @@ CHECK_4A:
 	brne	CHECK_5A
 	rcall	POT_SCAN		; If so, check if parameter should be updated with pot value in r16
 	tst	r17
-.if USE_ORIGINAL_ENVELOP_CONTROL
+.if USE_ORIGINAL_ENVELOPE_CONTROL
 	breq	EXIT_CHECK4A		; Skip update if pot hasn't been updated
 	sts	KNOB_AMP_DECAY, r16
 EXIT_CHECK4A:
@@ -5335,7 +4831,7 @@ DCF_SUSTAIN_OFF:
 	sts	DECAYTIME, r16		; Set decay time to value of decay knob
 	sts	RELEASETIME, r16	; Set release time to value of decay knob
 	rjmp	DONE_KNOBS
-.else	; USE_ORIGINAL_ENVELOP_CONTROL
+.else	; USE_ORIGINAL_ENVELOPE_CONTROL
 	breq	DONE_KNOBS		; Skip update if pot hasn't been updated
 	sts	KNOB_AMP_DECAY, r16
 ; set update_env_dca flags
@@ -5343,7 +4839,7 @@ DCF_SUSTAIN_OFF:
 	ori	r16, (1<<UPDATE_ENV_DCA)
 	sts	MIDI_TASK_UPDATE, r16
 	rjmp	DONE_KNOBS
-.endif	; USE_ORIGINAL_ENVELOP_CONTROL
+.endif	; USE_ORIGINAL_ENVELOPE_CONTROL
 
 CHECK_5A:
 	cpi	r20, 5			; Update knob 5^, Amplitude attack?
@@ -5352,9 +4848,9 @@ CHECK_5A:
 	tst	r17
 	breq	DONE_KNOBS		; Skip update if pot hasn't been updated
 	sts	KNOB_AMP_ATTACK, r16
-.if !USE_ORIGINAL_ENVELOP_CONTROL
+.if !USE_ORIGINAL_ENVELOPE_CONTROL
 	sts	ATTACKTIME, r16
-.endif	; !USE_ORIGINAL_ENVELOP_CONTROL
+.endif	; !USE_ORIGINAL_ENVELOPE_CONTROL
 
 DONE_KNOBS:
 
@@ -5363,7 +4859,15 @@ DONE_KNOBS:
 ;-----------------------------------------------------------------------------
 
 MIDI_VELOCITY:
-; Not implemented, but this is a good spot.
+	; Add velocity control of filter
+
+	lds 	R16, MIDIVELOCITY		; Value is 0..127
+	lsl	R16
+	lds	r17, VCFENVMOD
+	mul	r16, r17
+; !!!! todo: add switch to enable midi velocity to dcf
+;	mov	r1, r17
+	sts	VELOCITY_ENVMOD, r1
 
 ;-----------------------------------------------------------------------------
 
@@ -5376,8 +4880,6 @@ MIDI_VELOCITY:
 	mov	r19, r23		;/ r19:r18 = t
 	lds	r16, TPREV_L		;\
 	lds	r17, TPREV_H		;/ r17:r16 = t0
-
-; what is with timer wrap/overflow?
 	sub	r22, r16		;\ r23:r22 = t - t0 = dt
 	sbc	r23, r17		;/ (1 bit = 32 µs)
 	sts	TPREV_L, r18		;\
@@ -5693,14 +5195,6 @@ MLP_LFO2NWR:
 ;check envelope phase:
 	lds	r17, ENVPHASE
 	lds	r16, KNOB_AMP_ATTACK
-	;cpi	r17, 5			; If we're in pre-attack mode, zero the envelope and start attack, otherwise continue
-	;brne	MLP_PHASE
-	;ldi	r17, 0
-	;sts	ENV_FRAC_L, r17		;\
-	;sts	ENV_FRAC_H, r17		; > Set envelope to zero
-	;sts	ENV_INTEGR, r17		;/
-	;ldi	r17, 1
-	;sts	ENVPHASE, r17		; store new phase (attack)
 
 MLP_PHASE:
 	cpi	r17, 1
@@ -5711,11 +5205,9 @@ MLP_PHASE:
 	lds	r16, RELEASETIME
 	cpi	r17, 4
 	breq	MLP_ENVAR		; when "release"
-.if USE_SUSTAIN_UPDATE_ON_NOTE
 	lds	r22, SUSTAINLEVEL
 	cpi	r17, 3			; when sustain
 	breq	MLP_ESUSTAIN
-.endif	; USE_SUSTAIN_UPDATE_ON_NOTE
 	rjmp	MLP_EEXIT		; when "stop" or "sustain"
 
 ;calculate dL:
@@ -5757,10 +5249,6 @@ MLP_EDECAY:
 	lds	r22, SUSTAINLEVEL
 	cp	r22, r21		; sustain level < L - dL?
 	brlo	MLP_ESTORE		; yes: Keep going if we haven't hit sustain level
-.if !USE_SUSTAIN_UPDATE_ON_NOTE
-	ldi	r16, 3			; no: now sustain
-	rjmp	MLP_ESTOREP
-.else	; !USE_SUSTAIN_UPDATE_ON_NOTE
 	ldi	r16, 3			; now sustain
 	sts	ENVPHASE, r16		; store phase
 MLP_ESUSTAIN:
@@ -5768,7 +5256,6 @@ MLP_ESUSTAIN:
 	clr	r20
 	mov	r21, r22
 	rjmp	MLP_ESTORE
-.endif	; !USE_SUSTAIN_UPDATE_ON_NOTE
 
 MLP_ERELEASE:
 	sub	r19, r16		;\
@@ -5798,15 +5285,6 @@ MLP_EEXIT:
 ;check envelope phase:
 	lds	r17, ENVPHASE2
 	lds	r16, KNOB_DCF_ATTACK
-	;cpi	r17, 5			; If we're in pre-attack mode, zero the envelope and start attack, otherwise continue
-	;brne	MLP_PHASE2
-	;ldi	r17, 0
-	;sts	ENV_FRAC_L2, r17	;\
-	;sts	ENV_FRAC_H2, r17	; > Set envelope to zero
-	;sts	ENV_INTEGr2, r17	;/
-	;ldi	r17, 1
-	;sts	ENVPHASE2, r17		; store new phase (attack)
-
 
 MLP_PHASE2:
 	cpi	r17, 1
@@ -5817,11 +5295,9 @@ MLP_PHASE2:
 	lds	r16, RELEASETIME2
 	cpi	r17, 4
 	breq	MLP_ENVAR2		; when "release"
-.if USE_SUSTAIN_UPDATE_ON_NOTE
 	lds	r22, SUSTAINLEVEL2
 	cpi	r17, 3			; when sustain
 	breq	MLP_ESUSTAIN2
-.endif	; USE_SUSTAIN_UPDATE_ON_NOTE
 	rjmp	MLP_EEXIT2		; when "stop" or "sustain"
 
 ;calculate dL:
@@ -5863,10 +5339,6 @@ MLP_EDECAY2:
 	lds	r22, SUSTAINLEVEL2
 	cp	r22, r21
 	brlo	MLP_ESTORE2		; Keep going if we haven't hit sustain level
-.if !USE_SUSTAIN_UPDATE_ON_NOTE
-	ldi	r16, 3			; now sustain
-	rjmp	MLP_ESTOREP2
-.else	; !USE_SUSTAIN_UPDATE_ON_NOTE
 	ldi	r16, 3			; now sustain
 	sts	ENVPHASE2, r16		; store phase
 MLP_ESUSTAIN2:
@@ -5874,7 +5346,6 @@ MLP_ESUSTAIN2:
 	clr	r20
 	mov	r21, r22
 	rjmp	MLP_ESTORE2
-.endif	; !USE_SUSTAIN_UPDATE_ON_NOTE
 
 MLP_ERELEASE2:
 	sub	r19, r16		;\
@@ -5888,6 +5359,7 @@ MLP_BOTTOM2:
 	ldi	r20, 0			; > L = 0
 	ldi	r21, 0			;/
 	ldi	r16, 0			; stop
+	sts	VCF_STATUS, r16		; Flag VCF as off when we hit the bottom limit.
 
 MLP_ESTOREP2:
 	sts	ENVPHASE2, r16		; store phase
@@ -5909,7 +5381,17 @@ MLP_EEXIT2:
 ;no key is pressed:
 MLP_KEYOFF:
 	ldi	r16,4			;\
+	; don't restart envelope 1 for release if it's already stopped.
+	lds	r17, ENVPHASE
+	tst	r17
+	breq	MLP_NOTEON		; Don't put envelope 1 in release mode if it is already stopped
+
 	sts	ENVPHASE, r16		;/ "release"
+	; don't restart envelope 2 for release if it's already stopped.
+	lds	r17, ENVPHASE2
+	tst	r17
+	breq	MLP_NOTEON		; Don't put envelope 2 in release mode if it is already stopped
+			;
 	sts	ENVPHASE2, r16		; "release" for envelope 2
 	rjmp	MLP_NOTEON
 
@@ -5934,10 +5416,11 @@ MLP_KEYON1:
 	ldi	r16, 1			;\
 	sts	ENVPHASE, r16		;/ attack
 	sts	ENVPHASE2, r16		; attack for envelope 2
+	sts	VCF_STATUS, r16		; Flag VCF as on
 
 .if USE_INIT_ENV_GENERATORS
-; can cause hearable clicks. This occurs when the envelop generator
-; is retriggert before the envelop reaches zero. In this case the next
+; can cause hearable clicks. This occurs when the envelope generator
+; is retriggert before the envelope reaches zero. In this case the next
 ; lines forces the level to zero and we hear the breakdown.
 	ldi	r16, 0
 	sts	ENV_FRAC_L, r16		;\
@@ -6000,17 +5483,9 @@ MLP_NLIM4:
 	cpi	r23, 36			; note < 36
 	brlo	MLP_NLIM3		; shift one octave up, until note >= 36
 
-;transponse 1 octave down:
+;transpose 1 octave down:
 	subi	r23, 12			; note -= 12; Note range limited to 24..84
 
-.if USE_ORIGINAL_WAVETABLES
-; Track which wavetable to use:
-	mov	r25, r23		; Store a copy of the note number in r25
-	subi	r25, 24			; 0..60(63)
-	lsr	r25
-	lsr	r25			; 0..15
-	sts	WAVETABLE, r25		; Save wavetable 0..15 for lookup when generating oscillator
-.endif	; USE_ORIGINAL_WAVETABLES
 
 ;portamento:
 	lds	r25, NOTE_L		;\
@@ -6120,12 +5595,8 @@ MLP_PBX:
 	add	r17, r18		; r17 = 1,5*LL-128    +64..254
 
 MLP_OM1:
-.if USE_ORIGINAL_MUL8X8S
-	rcall	MUL8X8S			; r17,r16 = LFO*mod
-.else	; USE_ORIGINAL_MUL8X8S
 	mulsu	r16, r17		; LFOVALUE*LFOLEVEL
 	movw	r16, r0
-.endif	; USE_ORIGINAL_MUL8X8S
 	ldi	r18, 4			;\
 	rcall	ASR16			;/ r17,r16 = LFO*mod / 16
 	add	r22, r16		;\
@@ -6148,7 +5619,6 @@ MLP_VCOLFOX:
 	push	r22			;\ note# = 0..108
 	push	r23			;/ store for phase delta B
 
-.if !USE_ORIGINAL_WAVETABLES
 ; determine the wavetable for osc A: note = 0..108
 
 ; Track which wavetable to use:
@@ -6161,7 +5631,6 @@ WTA_NOUFL:
 	lsr	r25			; (108-12-1)/8 = 11
 	lsr	r25			; 0..11
 	sts	WAVETABLE_A, r25	; Save wavetable 0..15 for lookup when generating oscillator
-.endif	; !USE_ORIGINAL_WAVETABLES
 
 ;phase delta A:
 ;octave A:
@@ -6188,7 +5657,7 @@ WTA_NOUFL:
 	lds	r16, DETUNEB_FRAC	;\ r17,r16 = detuneB
 	lds	r17, DETUNEB_INTG	;/ -128,000..+127,996
 	ldi	r18, 4			;\ r17,r16 = detuneB / 16
-	rcall	ASr16			;/ -8,0000..+7,9998
+	rcall	ASR16			;/ -8,0000..+7,9998
 	add	r22, r16		;\
 	adc	r23, r17		;/
 
@@ -6197,9 +5666,7 @@ WTA_NOUFL:
 	sbrc	r16, SW_OSCB_OCT
 	subi	r23, 244		; n += 12
 
-.if !USE_ORIGINAL_WAVETABLES
 ; determine the wavetable for osc B; r23: note = 0..108,
-
 ; Track which wavetable to use:
 	mov	r25, r23		; Store a copy of the note number in r25
 	subi	r25, 13			; 13..108
@@ -6210,7 +5677,6 @@ WTB_NOUFL:
 	lsr	r25			; (108-12-1)/8 = 11
 	lsr	r25			; 0..11
 	sts	WAVETABLE_B, r25	; Save wavetable 0..15 for lookup when generating oscillator
-.endif	; !USE_ORIGINAL_WAVETABLES
 
 	rcall	NOTERECALC		; r23,r22 = m12 (0,0..11,996), note
 					; r20 = n12 (0..11), octave
@@ -6220,7 +5686,6 @@ WTB_NOUFL:
 	sts	DELTAB_0, r17
 	sts	DELTAB_1, r18
 	sts	DELTAB_2, r19
-
 
 MLP_VCOX:
 
@@ -6239,33 +5704,25 @@ MLP_VCOX:
 	lds	r18, PATCH_SWITCH1	; Is the LFO enabled?
 	sbrs	r18, SW_LFO_ENABLE
 	ldi	r17, 0			; Set LFO level to zero if switch is off
-.if USE_ORIGINAL_MUL8X8S
-	rcall	MUL8X8S			; r17,r16 = LFO * VCFLFOMOD
-	mov	r30, r17
-	ldi	r31, 0
-	rol	r17			; r17.7 --> Cy (sign)
-	sbc	r31, r31		; sign extension to r31
-.else	; USE_ORIGINAL_MUL8X8S
 	mulsu	r16, r17
 	mov	r30, r1
 	ldi	r31, 0
 	rol	r1			; r1.7 --> Cy (sign)
 	sbc	r31, r31		; sign extension to r31
-.endif	; USE_ORIGINAL_MUL8X8S
 					; r31:r30 = -255..+255
 MLP_DCF0:
 
 ;ENV mod:
 .if USE_ORIGINAL_VCFENVMOD
 	lds	r16, ENV_INTEGR2	; Get the integer part of the filter envelope
-	lds	r17, VCFENVMOD
+	lds	r17, VELOCITY_ENVMOD	; Use MIDI velocity * envmod
 	mul	r16, r17
 	movw	r16, r0			; r17,r16 = FILTER ENV * ENVMOD
 	rol	r16			; Cy = r16.7 (for rounding)
 	adc	r30, r17
 	adc	r31, ZERO
 .else	; USE_ORIGINAL_VCFENVMOD
-	lds	r16, VCFENVMOD
+	lds	r16, VELOCITY_ENVMOD
 	subi	r16, 0x80		; make signed -128..+127
 	lds	r17, ENV_INTEGR2	; 0..255
 	mulsu	r16, r17
@@ -6288,12 +5745,8 @@ MLP_DCF0:
 	subi	r16, 96			; r16 = 2*(n-48) (24/octave)   -96..+96
 	ldi	r17, 171		; 171/256 = 2/3
 
-.if USE_ORIGINAL_MUL8X8S
-	rcall	MUL8X8S			; r17 = 1,5*(n-48) (16/octave) -64..+64
-.else	; USE_ORIGINAL_MUL8X8S
 	mulsu	r16, r17
 	movw	r16, r0
-.endif	; USE_ORIGINAL_MUL8X8S
 	ldi	r18, 0			;\
 	sbrc	r17, 7			; > r18 = sign extension
 	ldi	r18, 255		;/  of r17
@@ -6316,21 +5769,7 @@ MLP_DCF1:
 	ldi	r16, 255
 
 MLP_DCF2:
-
 	lsr	r16			; 0..127
-.if MEEBLIP_SE_ORIGINAL_CODE
-	ldi	r30, TAB_VCF		;\
-	ldi	r31, 0			;/ Z = &Tab
-	rcall	TAB_BYTE		; r0 = 1.. 255
-	sts	LPF_I, r0		; Store Lowpass F value
-	ldi	r16, 10
-	sub	r0, r16			; Offset HP knob value
-	brcc	STORE_HPF
-	ldi	r16, 0x00		; Limit HP to min of 0
-	mov	r0, r16
-STORE_HPF:
-	sts	HPF_I, r0
-.else	;MEEBLIP_SE_ORIGINAL_CODE
 	ldi	r30, low( TAB_VCF)	;\
 	ldi	r31, high( TAB_VCF)	;/ Z = &Tab
 	rcall	TAB_BYTE		; r0 = 1.. 255
@@ -6341,29 +5780,43 @@ STORE_HPF:
 STORE_HPF:
 	sts	HPF_I, r16
 
+; Limit resonance at low filter cutoff settings
+	lds	r17, RESONANCE
+	lds	r16, LPF_I
+	cpi	r16, 16
+	brlo	LIMIT_REZ		; Only limit resonance if LPF_I is 0..15
+	mov	r16, r17
+	rjmp	EXIT_LIMIT_REZ
+LIMIT_REZ:
+	ldi	r30, low( TAB_REZ)	;\
+	ldi	r31, high( TAB_REZ)	;/ Z = &Tab
+	rcall	TAB_BYTE		; r16 = 0..15	; r16 holds maximum allow resonance
+	cp	r16, r17
+	brlo	EXIT_LIMIT_REZ
+	mov	r16, r17
+EXIT_LIMIT_REZ:
+	sts	SCALED_RESONANCE, r16	; Store scaled resonance
+
 .if !USE_ORIGINAL_Q_CALC
 ;-------------------------------------------------------------------------------------------------------------------
 ; Scale Filter Q value to compensate for resonance loss
 ; Doing this here to get it out of the sample loop
 ;-------------------------------------------------------------------------------------------------------------------
 
-	lds	r18, RESONANCE
-	lds	r16, LPF_I		;load 'F' value
+	lds	r18, LPF_I		;load 'F' value
 	ldi	r17, 0xff
 
-	sub	r17, r16		; 1-F
+	sub	r17, r18		; 1-F
 	lsr	r17
 	ldi	r19, Q_OFFSET
 	add	r17, r19		; f = (1-F)/2+4
 
-	sub	r18, r17		; Q-(1-f)
+	sub	r16, r17		; Q-(1-f)
 	brcc	REZ_OVERFLOW_CHECK	; if no overflow occured
-	ldi	r18, 0x00		;0x00 because of unsigned
+	ldi	r16, 0x00		; 0x00 because of unsigned
 REZ_OVERFLOW_CHECK:
-	sts	SCALED_RESONANCE, r18
+	sts	SCALED_RESONANCE, r16
 .endif	; !USE_ORIGINAL_Q_CALC
-
-.endif	; MEEBLIP_SE_ORIGINAL_CODE
 
 	;---------------
 	;sound level:
@@ -6381,17 +5834,9 @@ REZ_OVERFLOW_CHECK:
 
 MLP_VCAENV:
 	lds	r16,ENV_INTEGR
-.if MEEBLIP_SE_ORIGINAL_CODE
-	ldi	r30, TAB_VCA		;\
-	ldi	r31, 0			;/ Z = &Tab
-	rcall	TAB_BYTE		; r0 = 2..255
-	mov	r16, r0
-.else	; MEEBLIP_SE_ORIGINAL_CODE
 	ldi	r30, low( TAB_VCA)	;\
 	ldi	r31, high( TAB_VCA)	;/ Z = &Tab
 	rcall	TAB_BYTE		; r0 = 2..255
-.endif	; MEEBLIP_SE_ORIGINAL_CODE
-
 MLP_VCAOK:
 	sts	LEVEL, r16
 
@@ -6421,2672 +5866,10 @@ MLP_VCAOK:
 	;------------------------
 	rjmp	MAINLOOP
 
-.if USE_ORIGINAL_WAVETABLES
 ;-----------------------------------------------------------------------------
 ;
 ;*** Bandlimited sawtooth wavetables (each table is 256 bytes long,  unsigned integer)
-; 3 tables with 16*256 bytes = 12288 bytes = 12 kByte
 
-.if USE_ORIGINAL_BANDLIMITED_PWM
-SAW_LIMIT0:
-	.db	$F7, $FE, $FF, $FF, $FE, $FE, $FD, $FC
-	.db	$FB, $FA, $F9, $F8, $F7, $F6, $F5, $F4
-	.db	$F3, $F2, $F1, $F0, $EE, $ED, $EC, $EB
-	.db	$EA, $E9, $E8, $E7, $E6, $E5, $E4, $E3
-	.db	$E2, $E1, $E0, $DF, $DE, $DD, $DC, $DB
-	.db	$DA, $D9, $D8, $D7, $D6, $D5, $D4, $D3
-	.db	$D1, $D0, $CF, $CE, $CD, $CC, $CB, $CA
-	.db	$C9, $C8, $C7, $C6, $C5, $C4, $C3, $C2
-	.db	$C1, $C0, $BF, $BE, $BD, $BC, $BB, $BA
-	.db	$B9, $B8, $B7, $B5, $B4, $B3, $B2, $B1
-	.db	$B0, $AF, $AE, $AD, $AC, $AB, $AA, $A9
-	.db	$A8, $A7, $A6, $A5, $A4, $A3, $A2, $A1
-	.db	$A0, $9F, $9E, $9D, $9C, $9B, $99, $98
-	.db	$97, $96, $95, $94, $93, $92, $91, $90
-	.db	$8F, $8E, $8D, $8C, $8B, $8A, $89, $88
-	.db	$87, $86, $85, $84, $83, $82, $81, $7F
-	.db	$7E, $7D, $7C, $7B, $7A, $79, $78, $77
-	.db	$76, $75, $74, $73, $72, $71, $70, $6F
-	.db	$6E, $6D, $6C, $6B, $6A, $69, $68, $67
-	.db	$66, $64, $63, $62, $61, $60, $5F, $5E
-	.db	$5D, $5C, $5B, $5A, $59, $58, $57, $56
-	.db	$55, $54, $53, $52, $51, $50, $4F, $4E
-	.db	$4D, $4C, $4B, $4A, $48, $47, $46, $45
-	.db	$44, $43, $42, $41, $40, $3F, $3E, $3D
-	.db	$3C, $3B, $3A, $39, $38, $37, $36, $35
-	.db	$34, $33, $32, $31, $30, $2F, $2E, $2C
-	.db	$2B, $2A, $29, $28, $27, $26, $25, $24
-	.db	$23, $22, $21, $20, $1F, $1E, $1D, $1C
-	.db	$1B, $1A, $19, $18, $17, $16, $15, $14
-	.db	$13, $12, $11, $0F, $0E, $0D, $0C, $0B
-	.db	$0A, $09, $08, $07, $06, $05, $04, $03
-	.db	$02, $01, $01, $00, $00, $01, $08, $7F
-SAW_LIMIT1:
-	.db	$F6, $FF, $FF, $FD, $FC, $FA, $FA, $F9
-	.db	$F8, $F7, $F6, $F5, $F4, $F3, $F2, $F1
-	.db	$F0, $EF, $EE, $ED, $EC, $EB, $EA, $E9
-	.db	$E8, $E7, $E6, $E4, $E3, $E3, $E2, $E1
-	.db	$DF, $DE, $DD, $DD, $DC, $DA, $D9, $D8
-	.db	$D7, $D6, $D5, $D4, $D3, $D2, $D1, $D0
-	.db	$CF, $CE, $CD, $CC, $CB, $CA, $C9, $C8
-	.db	$C7, $C6, $C5, $C4, $C3, $C2, $C1, $C0
-	.db	$BF, $BE, $BD, $BC, $BB, $BA, $B9, $B8
-	.db	$B7, $B6, $B5, $B4, $B3, $B2, $B1, $B0
-	.db	$AF, $AE, $AD, $AC, $AB, $AA, $A9, $A8
-	.db	$A7, $A6, $A5, $A4, $A3, $A2, $A1, $A0
-	.db	$9F, $9E, $9D, $9C, $9B, $9A, $99, $98
-	.db	$97, $96, $95, $94, $93, $92, $91, $90
-	.db	$8F, $8E, $8D, $8C, $8B, $8A, $89, $88
-	.db	$87, $86, $85, $84, $83, $82, $81, $7F
-	.db	$7E, $7D, $7C, $7B, $7A, $79, $78, $77
-	.db	$76, $75, $74, $73, $72, $71, $70, $6F
-	.db	$6E, $6D, $6C, $6B, $6A, $69, $68, $67
-	.db	$66, $65, $64, $63, $62, $61, $60, $5F
-	.db	$5E, $5D, $5C, $5B, $5A, $59, $58, $57
-	.db	$56, $55, $54, $53, $52, $51, $50, $4F
-	.db	$4E, $4D, $4C, $4B, $4A, $49, $48, $47
-	.db	$46, $45, $44, $43, $42, $41, $40, $3F
-	.db	$3E, $3D, $3C, $3B, $3A, $39, $38, $37
-	.db	$36, $35, $34, $33, $32, $31, $30, $2F
-	.db	$2E, $2D, $2C, $2B, $2A, $29, $28, $27
-	.db	$26, $25, $23, $22, $22, $21, $20, $1E
-	.db	$1D, $1C, $1C, $1B, $19, $18, $17, $16
-	.db	$15, $14, $13, $12, $11, $10, $0F, $0E
-	.db	$0D, $0C, $0B, $0A, $09, $08, $07, $06
-	.db	$05, $05, $03, $02, $00, $00, $09, $7F
-SAW_LIMIT2:
-	.db	$F7, $FF, $FE, $FD, $FC, $FB, $FA, $F9
-	.db	$F8, $F7, $F6, $F5, $F4, $F3, $F2, $F0
-	.db	$EF, $EE, $ED, $EC, $EB, $EA, $E9, $E8
-	.db	$E7, $E6, $E5, $E4, $E3, $E2, $E1, $E0
-	.db	$DF, $DE, $DD, $DC, $DB, $DA, $D9, $D8
-	.db	$D7, $D6, $D5, $D4, $D3, $D2, $D1, $D0
-	.db	$CF, $CE, $CD, $CC, $CB, $CA, $C9, $C8
-	.db	$C7, $C6, $C5, $C4, $C3, $C2, $C1, $C0
-	.db	$BF, $BE, $BD, $BC, $BB, $BA, $B9, $B8
-	.db	$B7, $B6, $B5, $B4, $B3, $B2, $B1, $B0
-	.db	$AF, $AE, $AD, $AC, $AB, $AA, $A9, $A8
-	.db	$A7, $A6, $A5, $A4, $A3, $A2, $A1, $A0
-	.db	$9F, $9E, $9D, $9C, $9B, $9A, $99, $98
-	.db	$97, $96, $95, $94, $93, $92, $91, $90
-	.db	$8F, $8E, $8D, $8C, $8B, $8A, $89, $88
-	.db	$87, $86, $85, $84, $83, $82, $81, $7F
-	.db	$7E, $7D, $7C, $7B, $7A, $79, $78, $77
-	.db	$76, $75, $74, $73, $72, $71, $70, $6F
-	.db	$6E, $6D, $6C, $6B, $6A, $69, $68, $67
-	.db	$66, $65, $64, $63, $62, $61, $60, $5F
-	.db	$5E, $5D, $5C, $5B, $5A, $59, $58, $57
-	.db	$56, $55, $54, $53, $52, $51, $50, $4F
-	.db	$4E, $4D, $4C, $4B, $4A, $49, $48, $47
-	.db	$46, $45, $44, $43, $42, $41, $40, $3F
-	.db	$3E, $3D, $3C, $3B, $3A, $39, $38, $37
-	.db	$36, $35, $34, $33, $32, $31, $30, $2F
-	.db	$2E, $2D, $2C, $2B, $2A, $29, $28, $27
-	.db	$26, $25, $24, $23, $22, $21, $20, $1F
-	.db	$1E, $1D, $1C, $1B, $1A, $19, $18, $17
-	.db	$16, $15, $14, $13, $12, $11, $10, $0F
-	.db	$0D, $0C, $0B, $0A, $09, $08, $07, $06
-	.db	$05, $04, $03, $02, $01, $00, $08, $7F
-SAW_LIMIT3:
-	.db	$F7, $FF, $FF, $FC, $FC, $FB, $FA, $F9
-	.db	$F8, $F7, $F6, $F5, $F4, $F3, $F2, $F1
-	.db	$F0, $EF, $EE, $ED, $EC, $EB, $EA, $E9
-	.db	$E8, $E7, $E6, $E5, $E4, $E3, $E2, $E1
-	.db	$E0, $DF, $DD, $DD, $DB, $DB, $D9, $D9
-	.db	$D7, $D6, $D5, $D4, $D3, $D2, $D1, $D0
-	.db	$CF, $CE, $CD, $CC, $CB, $CA, $C9, $C8
-	.db	$C7, $C6, $C5, $C4, $C3, $C2, $C1, $C0
-	.db	$BF, $BE, $BD, $BC, $BB, $BA, $B9, $B8
-	.db	$B7, $B6, $B5, $B4, $B3, $B2, $B1, $B0
-	.db	$AF, $AE, $AD, $AC, $AB, $AA, $A9, $A8
-	.db	$A7, $A6, $A5, $A4, $A3, $A2, $A1, $A0
-	.db	$9F, $9E, $9D, $9C, $9B, $9A, $99, $98
-	.db	$97, $96, $95, $94, $93, $92, $91, $90
-	.db	$8F, $8E, $8D, $8C, $8B, $8A, $89, $88
-	.db	$87, $86, $85, $84, $83, $82, $81, $7F
-	.db	$7E, $7D, $7C, $7B, $7A, $79, $78, $77
-	.db	$76, $75, $74, $73, $72, $71, $70, $6F
-	.db	$6E, $6D, $6C, $6B, $6A, $69, $68, $67
-	.db	$66, $65, $64, $63, $62, $61, $60, $5F
-	.db	$5E, $5D, $5C, $5B, $5A, $59, $58, $57
-	.db	$56, $55, $54, $53, $52, $51, $50, $4F
-	.db	$4E, $4D, $4C, $4B, $4A, $49, $48, $47
-	.db	$46, $45, $44, $43, $42, $41, $40, $3F
-	.db	$3E, $3D, $3C, $3B, $3A, $39, $38, $37
-	.db	$36, $35, $34, $33, $32, $31, $30, $2F
-	.db	$2E, $2D, $2C, $2B, $2A, $29, $28, $26
-	.db	$26, $24, $24, $22, $22, $20, $1F, $1E
-	.db	$1D, $1C, $1B, $1A, $19, $18, $17, $16
-	.db	$15, $14, $13, $12, $11, $10, $0F, $0E
-	.db	$0D, $0C, $0B, $0A, $09, $08, $07, $06
-	.db	$05, $04, $03, $03, $00, $00, $08, $7F
-SAW_LIMIT4:
-	.db	$F5, $FF, $FB, $FD, $F8, $FB, $F7, $F7
-	.db	$F7, $F4, $F5, $F3, $F3, $F1, $F0, $F0
-	.db	$EE, $EE, $EC, $EB, $EA, $E9, $E9, $E7
-	.db	$E6, $E5, $E4, $E4, $E2, $E1, $E0, $DF
-	.db	$DE, $DD, $DC, $DB, $DA, $D9, $D8, $D7
-	.db	$D6, $D5, $D4, $D3, $D2, $D1, $D0, $CF
-	.db	$CE, $CD, $CC, $CB, $CA, $C9, $C8, $C7
-	.db	$C6, $C5, $C4, $C3, $C2, $C1, $C0, $BF
-	.db	$BE, $BD, $BC, $BB, $BA, $B9, $B8, $B7
-	.db	$B6, $B5, $B4, $B3, $B2, $B1, $B0, $AF
-	.db	$AE, $AD, $AC, $AB, $AA, $A9, $A8, $A7
-	.db	$A6, $A5, $A5, $A3, $A2, $A1, $A0, $A0
-	.db	$9E, $9D, $9C, $9B, $9B, $99, $99, $97
-	.db	$96, $95, $94, $94, $92, $91, $90, $8F
-	.db	$8F, $8D, $8D, $8B, $8A, $8A, $88, $88
-	.db	$86, $86, $85, $83, $83, $81, $81, $7F
-	.db	$7E, $7E, $7C, $7C, $7A, $79, $79, $77
-	.db	$77, $75, $75, $74, $72, $72, $70, $70
-	.db	$6F, $6E, $6D, $6B, $6B, $6A, $69, $68
-	.db	$66, $66, $64, $64, $63, $62, $61, $5F
-	.db	$5F, $5E, $5D, $5C, $5A, $5A, $59, $58
-	.db	$57, $56, $55, $54, $53, $52, $51, $50
-	.db	$4F, $4E, $4D, $4C, $4B, $4A, $49, $48
-	.db	$47, $46, $45, $44, $43, $42, $41, $40
-	.db	$3F, $3E, $3D, $3C, $3B, $3A, $39, $38
-	.db	$37, $36, $35, $34, $33, $32, $31, $30
-	.db	$2F, $2E, $2D, $2C, $2B, $2A, $29, $28
-	.db	$27, $26, $25, $24, $23, $22, $21, $20
-	.db	$1F, $1E, $1D, $1B, $1B, $1A, $19, $18
-	.db	$16, $16, $15, $14, $13, $11, $11, $0F
-	.db	$0F, $0E, $0C, $0C, $0A, $0B, $08, $08
-	.db	$08, $04, $07, $02, $04, $00, $0A, $7F
-SAW_LIMIT5:
-	.db	$E9, $FF, $F1, $F5, $F7, $F0, $F2, $F3
-	.db	$EE, $EF, $F0, $EC, $EC, $EC, $E9, $E9
-	.db	$E9, $E7, $E6, $E6, $E4, $E3, $E3, $E1
-	.db	$E0, $E1, $DF, $DD, $DE, $DC, $DB, $DB
-	.db	$D9, $D8, $D8, $D6, $D5, $D5, $D4, $D2
-	.db	$D2, $D1, $CF, $CF, $CE, $CD, $CC, $CB
-	.db	$CA, $C9, $C8, $C7, $C6, $C6, $C4, $C4
-	.db	$C3, $C1, $C1, $C0, $BF, $BE, $BD, $BC
-	.db	$BB, $BA, $B9, $B8, $B8, $B6, $B5, $B5
-	.db	$B3, $B2, $B2, $B1, $AF, $AF, $AE, $AD
-	.db	$AC, $AB, $AA, $A9, $A8, $A7, $A6, $A5
-	.db	$A4, $A4, $A3, $A1, $A1, $A0, $9E, $9E
-	.db	$9D, $9C, $9B, $9A, $99, $98, $97, $96
-	.db	$95, $94, $93, $92, $92, $90, $8F, $8F
-	.db	$8E, $8D, $8C, $8B, $8A, $89, $88, $87
-	.db	$86, $85, $84, $83, $82, $81, $81, $7F
-	.db	$7E, $7E, $7D, $7C, $7B, $7A, $79, $78
-	.db	$77, $76, $75, $74, $73, $72, $71, $70
-	.db	$70, $6F, $6D, $6D, $6C, $6B, $6A, $69
-	.db	$68, $67, $66, $65, $64, $63, $62, $61
-	.db	$61, $5F, $5E, $5E, $5C, $5B, $5B, $5A
-	.db	$59, $58, $57, $56, $55, $54, $53, $52
-	.db	$51, $50, $50, $4E, $4D, $4D, $4C, $4A
-	.db	$4A, $49, $47, $47, $46, $45, $44, $43
-	.db	$42, $41, $40, $3F, $3E, $3E, $3C, $3B
-	.db	$3B, $39, $39, $38, $37, $36, $35, $34
-	.db	$33, $32, $31, $30, $30, $2E, $2D, $2D
-	.db	$2B, $2A, $2A, $29, $27, $27, $26, $24
-	.db	$24, $23, $21, $22, $20, $1E, $1F, $1E
-	.db	$1C, $1C, $1B, $19, $19, $18, $16, $16
-	.db	$16, $13, $13, $13, $0F, $10, $11, $0C
-	.db	$0D, $0F, $08, $0A, $0E, $00, $16, $7F
-SAW_LIMIT6:
-	.db	$DC, $FF, $F3, $E9, $F0, $F3, $ED, $E9
-	.db	$ED, $EE, $E9, $E7, $EA, $E9, $E5, $E4
-	.db	$E6, $E5, $E1, $E1, $E2, $E0, $DE, $DE
-	.db	$DE, $DC, $DA, $DB, $DB, $D8, $D7, $D7
-	.db	$D7, $D5, $D3, $D4, $D3, $D1, $D0, $D0
-	.db	$CF, $CD, $CD, $CD, $CB, $CA, $C9, $C9
-	.db	$C8, $C6, $C6, $C5, $C4, $C2, $C2, $C2
-	.db	$C0, $BF, $BF, $BE, $BC, $BB, $BB, $BA
-	.db	$B8, $B8, $B7, $B6, $B5, $B4, $B4, $B3
-	.db	$B1, $B1, $B0, $AF, $AD, $AD, $AD, $AB
-	.db	$AA, $AA, $A9, $A7, $A6, $A6, $A5, $A4
-	.db	$A3, $A2, $A1, $A0, $9F, $9F, $9E, $9C
-	.db	$9C, $9B, $9A, $99, $98, $98, $96, $95
-	.db	$94, $94, $93, $91, $91, $90, $8F, $8E
-	.db	$8D, $8D, $8B, $8A, $8A, $89, $87, $87
-	.db	$86, $85, $84, $83, $83, $81, $80, $80
-	.db	$7F, $7E, $7C, $7C, $7B, $7A, $79, $78
-	.db	$78, $76, $75, $75, $74, $72, $72, $71
-	.db	$70, $6F, $6E, $6E, $6C, $6B, $6B, $6A
-	.db	$69, $67, $67, $66, $65, $64, $63, $63
-	.db	$61, $60, $60, $5F, $5E, $5D, $5C, $5B
-	.db	$5A, $59, $59, $58, $56, $55, $55, $54
-	.db	$52, $52, $52, $50, $4F, $4E, $4E, $4C
-	.db	$4B, $4B, $4A, $49, $48, $47, $47, $45
-	.db	$44, $44, $43, $41, $40, $40, $3F, $3D
-	.db	$3D, $3D, $3B, $3A, $39, $39, $37, $36
-	.db	$36, $35, $34, $32, $32, $32, $30, $2F
-	.db	$2F, $2E, $2C, $2B, $2C, $2A, $28, $28
-	.db	$28, $27, $24, $24, $25, $23, $21, $21
-	.db	$21, $1F, $1D, $1E, $1E, $1A, $19, $1B
-	.db	$1A, $16, $15, $18, $16, $11, $12, $16
-	.db	$12, $0C, $0F, $16, $0C, $00, $23, $7F
-SAW_LIMIT7:
-	.db	$D0, $FC, $FF, $EF, $E7, $ED, $F3, $F1
-	.db	$EA, $E7, $EA, $ED, $EB, $E6, $E4, $E6
-	.db	$E8, $E5, $E1, $E0, $E2, $E2, $E0, $DD
-	.db	$DC, $DE, $DD, $DB, $D9, $D8, $D9, $D9
-	.db	$D6, $D4, $D4, $D5, $D4, $D1, $D0, $D0
-	.db	$D0, $CF, $CD, $CB, $CB, $CB, $CA, $C8
-	.db	$C7, $C7, $C7, $C5, $C3, $C2, $C2, $C2
-	.db	$C1, $BF, $BE, $BE, $BE, $BC, $BA, $B9
-	.db	$B9, $B9, $B7, $B6, $B5, $B5, $B4, $B3
-	.db	$B1, $B1, $B0, $B0, $AE, $AD, $AC, $AC
-	.db	$AB, $A9, $A8, $A8, $A7, $A6, $A5, $A3
-	.db	$A3, $A3, $A2, $A0, $9F, $9F, $9E, $9D
-	.db	$9B, $9A, $9A, $9A, $98, $97, $96, $96
-	.db	$95, $94, $92, $91, $91, $90, $8F, $8E
-	.db	$8D, $8D, $8C, $8A, $89, $88, $88, $87
-	.db	$86, $84, $84, $84, $83, $81, $80, $7F
-	.db	$7F, $7E, $7C, $7B, $7B, $7B, $79, $78
-	.db	$77, $77, $76, $75, $73, $72, $72, $71
-	.db	$70, $6F, $6E, $6E, $6D, $6B, $6A, $69
-	.db	$69, $68, $67, $65, $65, $65, $64, $62
-	.db	$61, $60, $60, $5F, $5D, $5C, $5C, $5C
-	.db	$5A, $59, $58, $57, $57, $56, $54, $53
-	.db	$53, $52, $51, $4F, $4F, $4E, $4E, $4C
-	.db	$4B, $4A, $4A, $49, $48, $46, $46, $46
-	.db	$45, $43, $41, $41, $41, $40, $3E, $3D
-	.db	$3D, $3D, $3C, $3A, $38, $38, $38, $37
-	.db	$35, $34, $34, $34, $32, $30, $2F, $2F
-	.db	$2F, $2E, $2B, $2A, $2B, $2B, $29, $26
-	.db	$26, $27, $26, $24, $22, $21, $23, $22
-	.db	$1F, $1D, $1D, $1F, $1E, $1A, $17, $19
-	.db	$1B, $19, $14, $12, $15, $18, $15, $0E
-	.db	$0C, $12, $18, $10, $00, $03, $2F, $7F
-SAW_LIMIT8:
-	.db	$C1, $EE, $FF, $F9, $EB, $E3, $E4, $EB
-	.db	$EF, $ED, $E7, $E2, $E1, $E5, $E7, $E6
-	.db	$E2, $DE, $DD, $DF, $E1, $E0, $DD, $DA
-	.db	$D8, $D9, $DB, $DA, $D8, $D5, $D3, $D4
-	.db	$D5, $D5, $D3, $D0, $CE, $CE, $CF, $CF
-	.db	$CE, $CB, $C9, $C9, $C9, $C9, $C8, $C6
-	.db	$C4, $C4, $C4, $C4, $C3, $C1, $BF, $BE
-	.db	$BE, $BE, $BE, $BC, $BA, $B9, $B9, $B9
-	.db	$B8, $B7, $B5, $B4, $B3, $B3, $B3, $B2
-	.db	$B0, $AE, $AE, $AE, $AE, $AC, $AB, $A9
-	.db	$A9, $A8, $A8, $A7, $A5, $A4, $A3, $A3
-	.db	$A3, $A2, $A0, $9F, $9E, $9E, $9D, $9D
-	.db	$9B, $99, $98, $98, $98, $97, $96, $94
-	.db	$93, $93, $93, $92, $91, $8F, $8E, $8D
-	.db	$8D, $8D, $8B, $8A, $89, $88, $88, $87
-	.db	$86, $85, $83, $82, $82, $82, $81, $7F
-	.db	$7E, $7D, $7D, $7D, $7C, $7A, $79, $78
-	.db	$77, $77, $76, $75, $74, $72, $72, $72
-	.db	$71, $70, $6E, $6D, $6C, $6C, $6C, $6B
-	.db	$69, $68, $67, $67, $67, $66, $64, $62
-	.db	$62, $61, $61, $60, $5F, $5D, $5C, $5C
-	.db	$5C, $5B, $5A, $58, $57, $57, $56, $56
-	.db	$54, $53, $51, $51, $51, $51, $4F, $4D
-	.db	$4C, $4C, $4C, $4B, $4A, $48, $47, $46
-	.db	$46, $46, $45, $43, $41, $41, $41, $41
-	.db	$40, $3E, $3C, $3B, $3B, $3B, $3B, $39
-	.db	$37, $36, $36, $36, $36, $34, $31, $30
-	.db	$30, $31, $31, $2F, $2C, $2A, $2A, $2B
-	.db	$2C, $2A, $27, $25, $24, $26, $27, $25
-	.db	$22, $1F, $1E, $20, $22, $21, $1D, $19
-	.db	$18, $1A, $1E, $1D, $18, $12, $10, $14
-	.db	$1B, $1C, $14, $06, $00, $11, $3E, $7F
-SAW_LIMIT9:
-	.db	$B6, $E1, $F9, $FF, $F7, $EB, $E2, $E0
-	.db	$E4, $E9, $ED, $EC, $E7, $E2, $DE, $DE
-	.db	$E0, $E3, $E4, $E2, $DE, $DB, $D9, $D9
-	.db	$DB, $DC, $DC, $D9, $D6, $D4, $D3, $D3
-	.db	$D4, $D5, $D4, $D1, $CF, $CD, $CC, $CD
-	.db	$CE, $CD, $CC, $CA, $C7, $C6, $C6, $C6
-	.db	$C7, $C6, $C4, $C2, $C0, $BF, $BF, $C0
-	.db	$C0, $BF, $BD, $BB, $B9, $B9, $B9, $B9
-	.db	$B8, $B7, $B5, $B3, $B2, $B2, $B2, $B2
-	.db	$B1, $B0, $AE, $AC, $AB, $AB, $AB, $AB
-	.db	$AA, $A8, $A6, $A5, $A5, $A5, $A4, $A4
-	.db	$A3, $A1, $9F, $9E, $9E, $9E, $9E, $9D
-	.db	$9B, $9A, $98, $97, $97, $97, $97, $95
-	.db	$94, $92, $91, $90, $90, $90, $8F, $8E
-	.db	$8D, $8B, $8A, $8A, $8A, $89, $88, $87
-	.db	$85, $84, $83, $83, $83, $82, $81, $7F
-	.db	$7E, $7D, $7C, $7C, $7C, $7B, $7A, $78
-	.db	$77, $76, $75, $75, $75, $74, $72, $71
-	.db	$70, $6F, $6F, $6F, $6E, $6D, $6B, $6A
-	.db	$68, $68, $68, $68, $67, $65, $64, $62
-	.db	$61, $61, $61, $61, $60, $5E, $5C, $5B
-	.db	$5B, $5A, $5A, $5A, $59, $57, $55, $54
-	.db	$54, $54, $54, $53, $51, $4F, $4E, $4D
-	.db	$4D, $4D, $4D, $4C, $4A, $48, $47, $46
-	.db	$46, $46, $46, $44, $42, $40, $3F, $3F
-	.db	$40, $40, $3F, $3D, $3B, $39, $38, $39
-	.db	$39, $39, $38, $35, $33, $32, $31, $32
-	.db	$33, $32, $30, $2E, $2B, $2A, $2B, $2C
-	.db	$2C, $2B, $29, $26, $23, $23, $24, $26
-	.db	$26, $24, $21, $1D, $1B, $1C, $1F, $21
-	.db	$21, $1D, $18, $13, $12, $16, $1B, $1F
-	.db	$1D, $14, $08, $00, $06, $1E, $49, $7F
-SAW_LIMIT10:
-	.db	$AB, $D1, $ED, $FC, $FF, $F9, $F0, $E6
-	.db	$DF, $DE, $E0, $E4, $E9, $EB, $EA, $E7
-	.db	$E2, $DD, $DA, $DA, $DB, $DE, $DF, $E0
-	.db	$DE, $DB, $D8, $D5, $D3, $D3, $D4, $D5
-	.db	$D6, $D6, $D4, $D1, $CF, $CC, $CB, $CB
-	.db	$CC, $CD, $CD, $CC, $CA, $C8, $C6, $C4
-	.db	$C3, $C3, $C4, $C4, $C4, $C3, $C1, $BF
-	.db	$BD, $BB, $BB, $BB, $BB, $BB, $BB, $B9
-	.db	$B7, $B5, $B4, $B3, $B2, $B3, $B3, $B2
-	.db	$B2, $B0, $AE, $AC, $AB, $AA, $AA, $AA
-	.db	$AA, $AA, $A8, $A7, $A5, $A3, $A2, $A2
-	.db	$A2, $A2, $A1, $A1, $9F, $9E, $9C, $9A
-	.db	$9A, $99, $99, $99, $99, $98, $96, $95
-	.db	$93, $92, $91, $91, $91, $90, $90, $8F
-	.db	$8D, $8B, $8A, $89, $88, $88, $88, $88
-	.db	$87, $86, $84, $82, $81, $80, $80, $7F
-	.db	$7F, $7F, $7E, $7D, $7B, $79, $78, $77
-	.db	$77, $77, $77, $76, $75, $74, $72, $70
-	.db	$6F, $6F, $6E, $6E, $6E, $6D, $6C, $6A
-	.db	$69, $67, $66, $66, $66, $66, $65, $65
-	.db	$63, $61, $60, $5E, $5E, $5D, $5D, $5D
-	.db	$5D, $5C, $5A, $58, $57, $55, $55, $55
-	.db	$55, $55, $54, $53, $51, $4F, $4D, $4D
-	.db	$4C, $4C, $4D, $4C, $4B, $4A, $48, $46
-	.db	$44, $44, $44, $44, $44, $44, $42, $40
-	.db	$3E, $3C, $3B, $3B, $3B, $3C, $3C, $3B
-	.db	$39, $37, $35, $33, $32, $32, $33, $34
-	.db	$34, $33, $30, $2E, $2B, $29, $29, $2A
-	.db	$2B, $2C, $2C, $2A, $27, $24, $21, $1F
-	.db	$20, $21, $24, $25, $25, $22, $1D, $18
-	.db	$15, $14, $16, $1B, $1F, $21, $20, $19
-	.db	$0F, $06, $00, $03, $12, $2E, $54, $7F
-SAW_LIMIT11:
-	.db	$A2, $C2, $DC, $EF, $FB, $FF, $FD, $F7
-	.db	$EF, $E6, $E0, $DC, $DB, $DD, $E0, $E3
-	.db	$E6, $E8, $E7, $E5, $E2, $DE, $DA, $D7
-	.db	$D5, $D5, $D6, $D8, $D9, $DA, $DA, $D9
-	.db	$D7, $D4, $D1, $CE, $CC, $CC, $CC, $CC
-	.db	$CD, $CE, $CE, $CD, $CC, $CA, $C7, $C5
-	.db	$C3, $C2, $C1, $C1, $C2, $C2, $C2, $C2
-	.db	$C1, $BF, $BD, $BB, $B9, $B8, $B7, $B6
-	.db	$B7, $B7, $B7, $B7, $B6, $B5, $B3, $B1
-	.db	$AF, $AD, $AC, $AC, $AC, $AC, $AC, $AC
-	.db	$AB, $AA, $A9, $A7, $A5, $A3, $A2, $A1
-	.db	$A1, $A1, $A1, $A1, $A0, $9F, $9E, $9D
-	.db	$9B, $99, $98, $97, $96, $96, $96, $96
-	.db	$95, $95, $94, $92, $91, $8F, $8D, $8C
-	.db	$8B, $8B, $8B, $8B, $8A, $8A, $89, $88
-	.db	$86, $85, $83, $82, $80, $80, $80, $80
-	.db	$7F, $7F, $7F, $7D, $7C, $7A, $79, $77
-	.db	$76, $75, $75, $74, $74, $74, $74, $73
-	.db	$72, $70, $6E, $6D, $6B, $6A, $6A, $69
-	.db	$69, $69, $69, $68, $67, $66, $64, $62
-	.db	$61, $60, $5F, $5E, $5E, $5E, $5E, $5E
-	.db	$5D, $5C, $5A, $58, $56, $55, $54, $53
-	.db	$53, $53, $53, $53, $53, $52, $50, $4E
-	.db	$4C, $4A, $49, $48, $48, $48, $48, $49
-	.db	$48, $47, $46, $44, $42, $40, $3E, $3D
-	.db	$3D, $3D, $3D, $3E, $3E, $3D, $3C, $3A
-	.db	$38, $35, $33, $32, $31, $31, $32, $33
-	.db	$33, $33, $33, $31, $2E, $2B, $28, $26
-	.db	$25, $25, $26, $27, $29, $2A, $2A, $28
-	.db	$25, $21, $1D, $1A, $18, $17, $19, $1C
-	.db	$1F, $22, $24, $23, $1F, $19, $10, $08
-	.db	$02, $00, $04, $10, $23, $3D, $5D, $7F
-SAW_LIMIT12:
-	.db	$9C, $B6, $CE, $E2, $F0, $FA, $FF, $FF
-	.db	$FC, $F6, $EF, $E8, $E2, $DD, $DA, $D9
-	.db	$DA, $DC, $DF, $E1, $E4, $E5, $E5, $E4
-	.db	$E2, $DE, $DB, $D7, $D4, $D2, $D1, $D0
-	.db	$D1, $D1, $D3, $D4, $D4, $D5, $D4, $D2
-	.db	$D0, $CE, $CB, $C9, $C7, $C5, $C4, $C4
-	.db	$C4, $C5, $C5, $C6, $C6, $C5, $C4, $C3
-	.db	$C1, $BF, $BC, $BA, $B9, $B7, $B7, $B7
-	.db	$B7, $B7, $B7, $B7, $B7, $B6, $B5, $B3
-	.db	$B2, $B0, $AE, $AC, $AB, $AA, $A9, $A9
-	.db	$A9, $A9, $A9, $A9, $A8, $A8, $A6, $A5
-	.db	$A3, $A1, $9F, $9E, $9C, $9C, $9B, $9B
-	.db	$9B, $9B, $9B, $9B, $9A, $99, $97, $96
-	.db	$94, $92, $91, $8F, $8E, $8E, $8D, $8D
-	.db	$8D, $8D, $8D, $8C, $8B, $8A, $89, $87
-	.db	$85, $83, $82, $81, $80, $80, $80, $80
-	.db	$7F, $7F, $7F, $7E, $7D, $7C, $7A, $78
-	.db	$76, $75, $74, $73, $72, $72, $72, $72
-	.db	$72, $71, $71, $70, $6E, $6D, $6B, $69
-	.db	$68, $66, $65, $64, $64, $64, $64, $64
-	.db	$64, $63, $63, $61, $60, $5E, $5C, $5A
-	.db	$59, $57, $57, $56, $56, $56, $56, $56
-	.db	$56, $55, $54, $53, $51, $4F, $4D, $4C
-	.db	$4A, $49, $48, $48, $48, $48, $48, $48
-	.db	$48, $48, $46, $45, $43, $40, $3E, $3C
-	.db	$3B, $3A, $39, $39, $3A, $3A, $3B, $3B
-	.db	$3B, $3A, $38, $36, $34, $31, $2F, $2D
-	.db	$2B, $2A, $2B, $2B, $2C, $2E, $2E, $2F
-	.db	$2E, $2D, $2B, $28, $24, $21, $1D, $1B
-	.db	$1A, $1A, $1B, $1E, $20, $23, $25, $26
-	.db	$25, $22, $1D, $17, $10, $09, $03, $00
-	.db	$00, $05, $0F, $1D, $31, $49, $63, $7F
-SAW_LIMIT13:
-	.db	$97, $AD, $C2, $D4, $E3, $EF, $F8, $FD
-	.db	$FF, $FE, $FB, $F6, $F0, $EA, $E4, $DF
-	.db	$DB, $D8, $D7, $D6, $D7, $D9, $DB, $DD
-	.db	$DF, $E1, $E1, $E1, $E0, $DF, $DC, $D9
-	.db	$D6, $D3, $D0, $CE, $CC, $CB, $CA, $CA
-	.db	$CB, $CC, $CC, $CD, $CE, $CE, $CD, $CC
-	.db	$CB, $C9, $C7, $C5, $C2, $C0, $BE, $BD
-	.db	$BB, $BB, $BB, $BB, $BB, $BB, $BC, $BC
-	.db	$BC, $BB, $BA, $B9, $B7, $B5, $B3, $B1
-	.db	$AF, $AE, $AC, $AB, $AA, $AA, $AA, $AA
-	.db	$AA, $AA, $AA, $AA, $A9, $A8, $A7, $A6
-	.db	$A4, $A2, $A0, $9E, $9D, $9B, $9A, $9A
-	.db	$99, $99, $99, $99, $99, $99, $99, $98
-	.db	$97, $96, $94, $93, $91, $8F, $8D, $8C
-	.db	$8A, $89, $89, $88, $88, $88, $88, $88
-	.db	$88, $87, $87, $86, $84, $83, $81, $80
-	.db	$7E, $7C, $7B, $79, $78, $78, $77, $77
-	.db	$77, $77, $77, $77, $76, $76, $75, $73
-	.db	$72, $70, $6E, $6C, $6B, $69, $68, $67
-	.db	$66, $66, $66, $66, $66, $66, $66, $65
-	.db	$65, $64, $62, $61, $5F, $5D, $5B, $59
-	.db	$58, $57, $56, $55, $55, $55, $55, $55
-	.db	$55, $55, $55, $54, $53, $51, $50, $4E
-	.db	$4C, $4A, $48, $46, $45, $44, $43, $43
-	.db	$43, $44, $44, $44, $44, $44, $44, $42
-	.db	$41, $3F, $3D, $3A, $38, $36, $34, $33
-	.db	$32, $31, $31, $32, $33, $33, $34, $35
-	.db	$35, $34, $33, $31, $2F, $2C, $29, $26
-	.db	$23, $20, $1F, $1E, $1E, $1E, $20, $22
-	.db	$24, $26, $28, $29, $28, $27, $24, $20
-	.db	$1B, $15, $0F, $09, $04, $01, $00, $02
-	.db	$07, $10, $1C, $2B, $3D, $52, $68, $7F
-SAW_LIMIT14:
-	.db	$92, $A4, $B5, $C4, $D3, $DF, $EA, $F2
-	.db	$F8, $FD, $FF, $FF, $FE, $FB, $F7, $F3
-	.db	$EE, $E9, $E4, $DF, $DB, $D8, $D5, $D4
-	.db	$D3, $D3, $D3, $D4, $D6, $D7, $D9, $DA
-	.db	$DB, $DC, $DC, $DC, $DB, $DA, $D8, $D6
-	.db	$D3, $D0, $CE, $CB, $C8, $C6, $C4, $C3
-	.db	$C2, $C1, $C1, $C1, $C1, $C2, $C2, $C3
-	.db	$C3, $C3, $C3, $C3, $C2, $C1, $C0, $BE
-	.db	$BC, $BA, $B8, $B6, $B4, $B2, $B0, $AF
-	.db	$AE, $AD, $AC, $AC, $AC, $AC, $AC, $AC
-	.db	$AC, $AC, $AC, $AC, $AB, $AA, $A9, $A7
-	.db	$A6, $A4, $A2, $A0, $9E, $9C, $9B, $99
-	.db	$98, $97, $97, $96, $96, $96, $96, $96
-	.db	$96, $96, $96, $95, $95, $94, $93, $91
-	.db	$90, $8E, $8C, $8A, $89, $87, $85, $84
-	.db	$82, $81, $81, $80, $80, $80, $80, $80
-	.db	$7F, $7F, $7F, $7F, $7E, $7E, $7D, $7B
-	.db	$7A, $78, $76, $75, $73, $71, $6F, $6E
-	.db	$6C, $6B, $6A, $6A, $69, $69, $69, $69
-	.db	$69, $69, $69, $69, $68, $68, $67, $66
-	.db	$64, $63, $61, $5F, $5D, $5B, $59, $58
-	.db	$56, $55, $54, $53, $53, $53, $53, $53
-	.db	$53, $53, $53, $53, $53, $52, $51, $50
-	.db	$4F, $4D, $4B, $49, $47, $45, $43, $41
-	.db	$3F, $3E, $3D, $3C, $3C, $3C, $3C, $3C
-	.db	$3D, $3D, $3E, $3E, $3E, $3E, $3D, $3C
-	.db	$3B, $39, $37, $34, $31, $2F, $2C, $29
-	.db	$27, $25, $24, $23, $23, $23, $24, $25
-	.db	$26, $28, $29, $2B, $2C, $2C, $2C, $2B
-	.db	$2A, $27, $24, $20, $1B, $16, $11, $0C
-	.db	$08, $04, $01, $00, $00, $02, $07, $0D
-	.db	$15, $20, $2C, $3B, $4A, $5B, $6D, $7F
-SAW_LIMIT15:
-	.db	$8E, $9D, $AB, $B9, $C6, $D1, $DC, $E5
-	.db	$ED, $F3, $F8, $FC, $FE, $FF, $FF, $FD
-	.db	$FB, $F8, $F4, $F0, $EC, $E8, $E3, $DF
-	.db	$DB, $D8, $D5, $D2, $D1, $CF, $CF, $CE
-	.db	$CF, $CF, $D0, $D1, $D2, $D3, $D4, $D5
-	.db	$D6, $D6, $D6, $D6, $D5, $D4, $D3, $D1
-	.db	$CF, $CD, $CB, $C8, $C6, $C3, $C1, $BF
-	.db	$BD, $BB, $BA, $B9, $B8, $B7, $B7, $B7
-	.db	$B7, $B7, $B7, $B8, $B8, $B8, $B8, $B8
-	.db	$B8, $B7, $B7, $B6, $B4, $B3, $B1, $B0
-	.db	$AE, $AC, $AA, $A8, $A6, $A4, $A2, $A1
-	.db	$9F, $9E, $9D, $9D, $9C, $9C, $9C, $9B
-	.db	$9C, $9C, $9C, $9C, $9C, $9B, $9B, $9A
-	.db	$9A, $99, $98, $96, $95, $93, $91, $8F
-	.db	$8E, $8C, $8A, $88, $86, $85, $84, $83
-	.db	$82, $81, $80, $80, $80, $80, $80, $80
-	.db	$7F, $7F, $7F, $7F, $7F, $7E, $7D, $7C
-	.db	$7B, $7A, $79, $77, $75, $73, $71, $70
-	.db	$6E, $6C, $6A, $69, $67, $66, $65, $65
-	.db	$64, $64, $63, $63, $63, $63, $63, $64
-	.db	$63, $63, $63, $62, $62, $61, $60, $5E
-	.db	$5D, $5B, $59, $57, $55, $53, $51, $4F
-	.db	$4E, $4C, $4B, $49, $48, $48, $47, $47
-	.db	$47, $47, $47, $47, $48, $48, $48, $48
-	.db	$48, $48, $47, $46, $45, $44, $42, $40
-	.db	$3E, $3C, $39, $37, $34, $32, $30, $2E
-	.db	$2C, $2B, $2A, $29, $29, $29, $29, $2A
-	.db	$2B, $2C, $2D, $2E, $2F, $30, $30, $31
-	.db	$30, $30, $2E, $2D, $2A, $27, $24, $20
-	.db	$1C, $17, $13, $0F, $0B, $07, $04, $02
-	.db	$00, $00, $01, $03, $07, $0C, $12, $1A
-	.db	$23, $2E, $39, $46, $54, $62, $71, $7F
-.endif	; USE_ORIGINAL_BANDLIMITED_PWM
-
-; Inverse sawtooth
-INV_SAW0:
-	.db	$7F, $08, $01, $00, $00, $01, $01, $02
-	.db	$03, $04, $05, $06, $07, $08, $09, $0A
-	.db	$0B, $0C, $0D, $0E, $0F, $11, $12, $13
-	.db	$14, $15, $16, $17, $18, $19, $1A, $1B
-	.db	$1C, $1D, $1E, $1F, $20, $21, $22, $23
-	.db	$24, $25, $26, $27, $28, $29, $2A, $2B
-	.db	$2C, $2E, $2F, $30, $31, $32, $33, $34
-	.db	$35, $36, $37, $38, $39, $3A, $3B, $3C
-	.db	$3D, $3E, $3F, $40, $41, $42, $43, $44
-	.db	$45, $46, $47, $48, $4A, $4B, $4C, $4D
-	.db	$4E, $4F, $50, $51, $52, $53, $54, $55
-	.db	$56, $57, $58, $59, $5A, $5B, $5C, $5D
-	.db	$5E, $5F, $60, $61, $62, $63, $64, $66
-	.db	$67, $68, $69, $6A, $6B, $6C, $6D, $6E
-	.db	$6F, $70, $71, $72, $73, $74, $75, $76
-	.db	$77, $78, $79, $7A, $7B, $7C, $7D, $7E
-	.db	$7F, $81, $82, $83, $84, $85, $86, $87
-	.db	$88, $89, $8A, $8B, $8C, $8D, $8E, $8F
-	.db	$90, $91, $92, $93, $94, $95, $96, $97
-	.db	$98, $99, $9B, $9C, $9D, $9E, $9F, $A0
-	.db	$A1, $A2, $A3, $A4, $A5, $A6, $A7, $A8
-	.db	$A9, $AA, $AB, $AC, $AD, $AE, $AF, $B0
-	.db	$B1, $B2, $B3, $B4, $B5, $B7, $B8, $B9
-	.db	$BA, $BB, $BC, $BD, $BE, $BF, $C0, $C1
-	.db	$C2, $C3, $C4, $C5, $C6, $C7, $C8, $C9
-	.db	$CA, $CB, $CC, $CD, $CE, $CF, $D0, $D1
-	.db	$D3, $D4, $D5, $D6, $D7, $D8, $D9, $DA
-	.db	$DB, $DC, $DD, $DE, $DF, $E0, $E1, $E2
-	.db	$E3, $E4, $E5, $E6, $E7, $E8, $E9, $EA
-	.db	$EB, $EC, $ED, $EE, $F0, $F1, $F2, $F3
-	.db	$F4, $F5, $F6, $F7, $F8, $F9, $FA, $FB
-	.db	$FC, $FD, $FE, $FE, $FF, $FF, $FE, $F7
-INV_SAW1:
-	.db	$7F, $09, $00, $00, $02, $03, $05, $05
-	.db	$06, $07, $08, $09, $0A, $0B, $0C, $0D
-	.db	$0E, $0F, $10, $11, $12, $13, $14, $15
-	.db	$16, $17, $18, $19, $1B, $1C, $1C, $1D
-	.db	$1E, $20, $21, $22, $22, $23, $25, $26
-	.db	$27, $28, $29, $2A, $2B, $2C, $2D, $2E
-	.db	$2F, $30, $31, $32, $33, $34, $35, $36
-	.db	$37, $38, $39, $3A, $3B, $3C, $3D, $3E
-	.db	$3F, $40, $41, $42, $43, $44, $45, $46
-	.db	$47, $48, $49, $4A, $4B, $4C, $4D, $4E
-	.db	$4F, $50, $51, $52, $53, $54, $55, $56
-	.db	$57, $58, $59, $5A, $5B, $5C, $5D, $5E
-	.db	$5F, $60, $61, $62, $63, $64, $65, $66
-	.db	$67, $68, $69, $6A, $6B, $6C, $6D, $6E
-	.db	$6F, $70, $71, $72, $73, $74, $75, $76
-	.db	$77, $78, $79, $7A, $7B, $7C, $7D, $7E
-	.db	$7F, $81, $82, $83, $84, $85, $86, $87
-	.db	$88, $89, $8A, $8B, $8C, $8D, $8E, $8F
-	.db	$90, $91, $92, $93, $94, $95, $96, $97
-	.db	$98, $99, $9A, $9B, $9C, $9D, $9E, $9F
-	.db	$A0, $A1, $A2, $A3, $A4, $A5, $A6, $A7
-	.db	$A8, $A9, $AA, $AB, $AC, $AD, $AE, $AF
-	.db	$B0, $B1, $B2, $B3, $B4, $B5, $B6, $B7
-	.db	$B8, $B9, $BA, $BB, $BC, $BD, $BE, $BF
-	.db	$C0, $C1, $C2, $C3, $C4, $C5, $C6, $C7
-	.db	$C8, $C9, $CA, $CB, $CC, $CD, $CE, $CF
-	.db	$D0, $D1, $D2, $D3, $D4, $D5, $D6, $D7
-	.db	$D8, $D9, $DA, $DC, $DD, $DD, $DE, $DF
-	.db	$E1, $E2, $E3, $E3, $E4, $E6, $E7, $E8
-	.db	$E9, $EA, $EB, $EC, $ED, $EE, $EF, $F0
-	.db	$F1, $F2, $F3, $F4, $F5, $F6, $F7, $F8
-	.db	$F9, $FA, $FA, $FC, $FD, $FF, $FF, $F6
-INV_SAW2:
-	.db	$7F, $08, $00, $01, $02, $03, $04, $05
-	.db	$06, $07, $08, $09, $0A, $0B, $0C, $0D
-	.db	$0F, $10, $11, $12, $13, $14, $15, $16
-	.db	$17, $18, $19, $1A, $1B, $1C, $1D, $1E
-	.db	$1F, $20, $21, $22, $23, $24, $25, $26
-	.db	$27, $28, $29, $2A, $2B, $2C, $2D, $2E
-	.db	$2F, $30, $31, $32, $33, $34, $35, $36
-	.db	$37, $38, $39, $3A, $3B, $3C, $3D, $3E
-	.db	$3F, $40, $41, $42, $43, $44, $45, $46
-	.db	$47, $48, $49, $4A, $4B, $4C, $4D, $4E
-	.db	$4F, $50, $51, $52, $53, $54, $55, $56
-	.db	$57, $58, $59, $5A, $5B, $5C, $5D, $5E
-	.db	$5F, $60, $61, $62, $63, $64, $65, $66
-	.db	$67, $68, $69, $6A, $6B, $6C, $6D, $6E
-	.db	$6F, $70, $71, $72, $73, $74, $75, $76
-	.db	$77, $78, $79, $7A, $7B, $7C, $7D, $7E
-	.db	$7F, $81, $82, $83, $84, $85, $86, $87
-	.db	$88, $89, $8A, $8B, $8C, $8D, $8E, $8F
-	.db	$90, $91, $92, $93, $94, $95, $96, $97
-	.db	$98, $99, $9A, $9B, $9C, $9D, $9E, $9F
-	.db	$A0, $A1, $A2, $A3, $A4, $A5, $A6, $A7
-	.db	$A8, $A9, $AA, $AB, $AC, $AD, $AE, $AF
-	.db	$B0, $B1, $B2, $B3, $B4, $B5, $B6, $B7
-	.db	$B8, $B9, $BA, $BB, $BC, $BD, $BE, $BF
-	.db	$C0, $C1, $C2, $C3, $C4, $C5, $C6, $C7
-	.db	$C8, $C9, $CA, $CB, $CC, $CD, $CE, $CF
-	.db	$D0, $D1, $D2, $D3, $D4, $D5, $D6, $D7
-	.db	$D8, $D9, $DA, $DB, $DC, $DD, $DE, $DF
-	.db	$E0, $E1, $E2, $E3, $E4, $E5, $E6, $E7
-	.db	$E8, $E9, $EA, $EB, $EC, $ED, $EE, $EF
-	.db	$F0, $F2, $F3, $F4, $F5, $F6, $F7, $F8
-	.db	$F9, $FA, $FB, $FC, $FD, $FE, $FF, $F7
-INV_SAW3:
-	.db	$7F, $08, $00, $00, $03, $03, $04, $05
-	.db	$06, $07, $08, $09, $0A, $0B, $0C, $0D
-	.db	$0E, $0F, $10, $11, $12, $13, $14, $15
-	.db	$16, $17, $18, $19, $1A, $1B, $1C, $1D
-	.db	$1E, $1F, $20, $22, $22, $24, $24, $26
-	.db	$26, $28, $29, $2A, $2B, $2C, $2D, $2E
-	.db	$2F, $30, $31, $32, $33, $34, $35, $36
-	.db	$37, $38, $39, $3A, $3B, $3C, $3D, $3E
-	.db	$3F, $40, $41, $42, $43, $44, $45, $46
-	.db	$47, $48, $49, $4A, $4B, $4C, $4D, $4E
-	.db	$4F, $50, $51, $52, $53, $54, $55, $56
-	.db	$57, $58, $59, $5A, $5B, $5C, $5D, $5E
-	.db	$5F, $60, $61, $62, $63, $64, $65, $66
-	.db	$67, $68, $69, $6A, $6B, $6C, $6D, $6E
-	.db	$6F, $70, $71, $72, $73, $74, $75, $76
-	.db	$77, $78, $79, $7A, $7B, $7C, $7D, $7E
-	.db	$7F, $81, $82, $83, $84, $85, $86, $87
-	.db	$88, $89, $8A, $8B, $8C, $8D, $8E, $8F
-	.db	$90, $91, $92, $93, $94, $95, $96, $97
-	.db	$98, $99, $9A, $9B, $9C, $9D, $9E, $9F
-	.db	$A0, $A1, $A2, $A3, $A4, $A5, $A6, $A7
-	.db	$A8, $A9, $AA, $AB, $AC, $AD, $AE, $AF
-	.db	$B0, $B1, $B2, $B3, $B4, $B5, $B6, $B7
-	.db	$B8, $B9, $BA, $BB, $BC, $BD, $BE, $BF
-	.db	$C0, $C1, $C2, $C3, $C4, $C5, $C6, $C7
-	.db	$C8, $C9, $CA, $CB, $CC, $CD, $CE, $CF
-	.db	$D0, $D1, $D2, $D3, $D4, $D5, $D6, $D7
-	.db	$D9, $D9, $DB, $DB, $DD, $DD, $DF, $E0
-	.db	$E1, $E2, $E3, $E4, $E5, $E6, $E7, $E8
-	.db	$E9, $EA, $EB, $EC, $ED, $EE, $EF, $F0
-	.db	$F1, $F2, $F3, $F4, $F5, $F6, $F7, $F8
-	.db	$F9, $FA, $FB, $FC, $FC, $FF, $FF, $F7
-INV_SAW4:
-	.db	$7F, $0A, $00, $04, $02, $07, $04, $08
-	.db	$08, $08, $0B, $0A, $0C, $0C, $0E, $0F
-	.db	$0F, $11, $11, $13, $14, $15, $16, $16
-	.db	$18, $19, $1A, $1B, $1B, $1D, $1E, $1F
-	.db	$20, $21, $22, $23, $24, $25, $26, $27
-	.db	$28, $29, $2A, $2B, $2C, $2D, $2E, $2F
-	.db	$30, $31, $32, $33, $34, $35, $36, $37
-	.db	$38, $39, $3A, $3B, $3C, $3D, $3E, $3F
-	.db	$40, $41, $42, $43, $44, $45, $46, $47
-	.db	$48, $49, $4A, $4B, $4C, $4D, $4E, $4F
-	.db	$50, $51, $52, $53, $54, $55, $56, $57
-	.db	$58, $59, $5A, $5A, $5C, $5D, $5E, $5F
-	.db	$5F, $61, $62, $63, $64, $64, $66, $66
-	.db	$68, $69, $6A, $6B, $6B, $6D, $6E, $6F
-	.db	$70, $70, $72, $72, $74, $75, $75, $77
-	.db	$77, $79, $79, $7A, $7C, $7C, $7E, $7E
-	.db	$7F, $81, $81, $83, $83, $85, $86, $86
-	.db	$88, $88, $8A, $8A, $8B, $8D, $8D, $8F
-	.db	$8F, $90, $91, $92, $94, $94, $95, $96
-	.db	$97, $99, $99, $9B, $9B, $9C, $9D, $9E
-	.db	$A0, $A0, $A1, $A2, $A3, $A5, $A5, $A6
-	.db	$A7, $A8, $A9, $AA, $AB, $AC, $AD, $AE
-	.db	$AF, $B0, $B1, $B2, $B3, $B4, $B5, $B6
-	.db	$B7, $B8, $B9, $BA, $BB, $BC, $BD, $BE
-	.db	$BF, $C0, $C1, $C2, $C3, $C4, $C5, $C6
-	.db	$C7, $C8, $C9, $CA, $CB, $CC, $CD, $CE
-	.db	$CF, $D0, $D1, $D2, $D3, $D4, $D5, $D6
-	.db	$D7, $D8, $D9, $DA, $DB, $DC, $DD, $DE
-	.db	$DF, $E0, $E1, $E2, $E4, $E4, $E5, $E6
-	.db	$E7, $E9, $E9, $EA, $EB, $EC, $EE, $EE
-	.db	$F0, $F0, $F1, $F3, $F3, $F5, $F4, $F7
-	.db	$F7, $F7, $FB, $F8, $FD, $FB, $FF, $F5
-INV_SAW5:
-	.db	$7F, $16, $00, $0E, $0A, $08, $0F, $0D
-	.db	$0C, $11, $10, $0F, $13, $13, $13, $16
-	.db	$16, $16, $18, $19, $19, $1B, $1C, $1C
-	.db	$1E, $1F, $1E, $20, $22, $21, $23, $24
-	.db	$24, $26, $27, $27, $29, $2A, $2A, $2B
-	.db	$2D, $2D, $2E, $30, $30, $31, $32, $33
-	.db	$34, $35, $36, $37, $38, $39, $39, $3B
-	.db	$3B, $3C, $3E, $3E, $3F, $40, $41, $42
-	.db	$43, $44, $45, $46, $47, $47, $49, $4A
-	.db	$4A, $4C, $4D, $4D, $4E, $50, $50, $51
-	.db	$52, $53, $54, $55, $56, $57, $58, $59
-	.db	$5A, $5B, $5B, $5C, $5E, $5E, $5F, $61
-	.db	$61, $62, $63, $64, $65, $66, $67, $68
-	.db	$69, $6A, $6B, $6C, $6D, $6D, $6F, $70
-	.db	$70, $71, $72, $73, $74, $75, $76, $77
-	.db	$78, $79, $7A, $7B, $7C, $7D, $7E, $7E
-	.db	$7F, $81, $81, $82, $83, $84, $85, $86
-	.db	$87, $88, $89, $8A, $8B, $8C, $8D, $8E
-	.db	$8F, $8F, $90, $92, $92, $93, $94, $95
-	.db	$96, $97, $98, $99, $9A, $9B, $9C, $9D
-	.db	$9E, $9E, $A0, $A1, $A1, $A3, $A4, $A4
-	.db	$A5, $A6, $A7, $A8, $A9, $AA, $AB, $AC
-	.db	$AD, $AE, $AF, $AF, $B1, $B2, $B2, $B3
-	.db	$B5, $B5, $B6, $B8, $B8, $B9, $BA, $BB
-	.db	$BC, $BD, $BE, $BF, $C0, $C1, $C1, $C3
-	.db	$C4, $C4, $C6, $C6, $C7, $C8, $C9, $CA
-	.db	$CB, $CC, $CD, $CE, $CF, $CF, $D1, $D2
-	.db	$D2, $D4, $D5, $D5, $D6, $D8, $D8, $D9
-	.db	$DB, $DB, $DC, $DE, $DD, $DF, $E1, $E0
-	.db	$E1, $E3, $E3, $E4, $E6, $E6, $E7, $E9
-	.db	$E9, $E9, $EC, $EC, $EC, $F0, $EF, $EE
-	.db	$F3, $F2, $F0, $F7, $F5, $F1, $FF, $E9
-INV_SAW6:
-	.db	$7F, $23, $00, $0C, $16, $0F, $0C, $12
-	.db	$16, $12, $11, $16, $18, $15, $16, $1A
-	.db	$1B, $19, $1A, $1E, $1E, $1D, $1F, $21
-	.db	$21, $21, $23, $25, $24, $24, $27, $28
-	.db	$28, $28, $2A, $2C, $2B, $2C, $2E, $2F
-	.db	$2F, $30, $32, $32, $32, $34, $35, $36
-	.db	$36, $37, $39, $39, $3A, $3B, $3D, $3D
-	.db	$3D, $3F, $40, $40, $41, $43, $44, $44
-	.db	$45, $47, $47, $48, $49, $4A, $4B, $4B
-	.db	$4C, $4E, $4E, $4F, $50, $52, $52, $52
-	.db	$54, $55, $55, $56, $58, $59, $59, $5A
-	.db	$5B, $5C, $5D, $5E, $5F, $60, $60, $61
-	.db	$63, $63, $64, $65, $66, $67, $67, $69
-	.db	$6A, $6B, $6B, $6C, $6E, $6E, $6F, $70
-	.db	$71, $72, $72, $74, $75, $75, $76, $78
-	.db	$78, $79, $7A, $7B, $7C, $7C, $7E, $7F
-	.db	$80, $80, $81, $83, $83, $84, $85, $86
-	.db	$87, $87, $89, $8A, $8A, $8B, $8D, $8D
-	.db	$8E, $8F, $90, $91, $91, $93, $94, $94
-	.db	$95, $96, $98, $98, $99, $9A, $9B, $9C
-	.db	$9C, $9E, $9F, $9F, $A0, $A1, $A2, $A3
-	.db	$A4, $A5, $A6, $A6, $A7, $A9, $AA, $AA
-	.db	$AB, $AD, $AD, $AD, $AF, $B0, $B1, $B1
-	.db	$B3, $B4, $B4, $B5, $B6, $B7, $B8, $B8
-	.db	$BA, $BB, $BB, $BC, $BE, $BF, $BF, $C0
-	.db	$C2, $C2, $C2, $C4, $C5, $C6, $C6, $C8
-	.db	$C9, $C9, $CA, $CB, $CD, $CD, $CD, $CF
-	.db	$D0, $D0, $D1, $D3, $D4, $D3, $D5, $D7
-	.db	$D7, $D7, $D8, $DB, $DB, $DA, $DC, $DE
-	.db	$DE, $DE, $E0, $E2, $E1, $E1, $E5, $E6
-	.db	$E4, $E5, $E9, $EA, $E7, $E9, $EE, $ED
-	.db	$E9, $ED, $F3, $F0, $E9, $F3, $FF, $DC
-INV_SAW7:
-	.db	$7F, $2F, $03, $00, $10, $18, $12, $0C
-	.db	$0E, $15, $18, $15, $12, $14, $19, $1B
-	.db	$19, $17, $1A, $1E, $1F, $1D, $1D, $1F
-	.db	$22, $23, $21, $22, $24, $26, $27, $26
-	.db	$26, $29, $2B, $2B, $2A, $2B, $2E, $2F
-	.db	$2F, $2F, $30, $32, $34, $34, $34, $35
-	.db	$37, $38, $38, $38, $3A, $3C, $3D, $3D
-	.db	$3D, $3E, $40, $41, $41, $41, $43, $45
-	.db	$46, $46, $46, $48, $49, $4A, $4A, $4B
-	.db	$4C, $4E, $4E, $4F, $4F, $51, $52, $53
-	.db	$53, $54, $56, $57, $57, $58, $59, $5A
-	.db	$5C, $5C, $5C, $5D, $5F, $60, $60, $61
-	.db	$62, $64, $65, $65, $65, $67, $68, $69
-	.db	$69, $6A, $6B, $6D, $6E, $6E, $6F, $70
-	.db	$71, $72, $72, $73, $75, $76, $77, $77
-	.db	$78, $79, $7B, $7B, $7B, $7C, $7E, $7F
-	.db	$7F, $80, $81, $83, $84, $84, $84, $86
-	.db	$87, $88, $88, $89, $8A, $8C, $8D, $8D
-	.db	$8E, $8F, $90, $91, $91, $92, $94, $95
-	.db	$96, $96, $97, $98, $9A, $9A, $9A, $9B
-	.db	$9D, $9E, $9F, $9F, $A0, $A2, $A3, $A3
-	.db	$A3, $A5, $A6, $A7, $A8, $A8, $A9, $AB
-	.db	$AC, $AC, $AD, $AE, $B0, $B0, $B1, $B1
-	.db	$B3, $B4, $B5, $B5, $B6, $B7, $B9, $B9
-	.db	$B9, $BA, $BC, $BE, $BE, $BE, $BF, $C1
-	.db	$C2, $C2, $C2, $C3, $C5, $C7, $C7, $C7
-	.db	$C8, $CA, $CB, $CB, $CB, $CD, $CF, $D0
-	.db	$D0, $D0, $D1, $D4, $D5, $D4, $D4, $D6
-	.db	$D9, $D9, $D8, $D9, $DB, $DD, $DE, $DC
-	.db	$DD, $E0, $E2, $E2, $E0, $E1, $E5, $E8
-	.db	$E6, $E4, $E6, $EB, $ED, $EA, $E7, $EA
-	.db	$F1, $F3, $ED, $E7, $EF, $FF, $FC, $D0
-INV_SAW8:
-	.db	$7F, $3E, $11, $00, $06, $14, $1C, $1B
-	.db	$14, $10, $12, $18, $1D, $1E, $1A, $18
-	.db	$19, $1D, $21, $22, $20, $1E, $1F, $22
-	.db	$25, $27, $26, $24, $25, $27, $2A, $2C
-	.db	$2B, $2A, $2A, $2C, $2F, $31, $31, $30
-	.db	$30, $31, $34, $36, $36, $36, $36, $37
-	.db	$39, $3B, $3B, $3B, $3B, $3C, $3E, $40
-	.db	$41, $41, $41, $41, $43, $45, $46, $46
-	.db	$46, $47, $48, $4A, $4B, $4C, $4C, $4C
-	.db	$4D, $4F, $51, $51, $51, $51, $53, $54
-	.db	$56, $56, $57, $57, $58, $5A, $5B, $5C
-	.db	$5C, $5C, $5D, $5F, $60, $61, $61, $62
-	.db	$62, $64, $66, $67, $67, $67, $68, $69
-	.db	$6B, $6C, $6C, $6C, $6D, $6E, $70, $71
-	.db	$72, $72, $72, $74, $75, $76, $77, $77
-	.db	$78, $79, $7A, $7C, $7D, $7D, $7D, $7E
-	.db	$7F, $81, $82, $82, $82, $83, $85, $86
-	.db	$87, $88, $88, $89, $8A, $8B, $8D, $8D
-	.db	$8D, $8E, $8F, $91, $92, $93, $93, $93
-	.db	$94, $96, $97, $98, $98, $98, $99, $9B
-	.db	$9D, $9D, $9E, $9E, $9F, $A0, $A2, $A3
-	.db	$A3, $A3, $A4, $A5, $A7, $A8, $A8, $A9
-	.db	$A9, $AB, $AC, $AE, $AE, $AE, $AE, $B0
-	.db	$B2, $B3, $B3, $B3, $B4, $B5, $B7, $B8
-	.db	$B9, $B9, $B9, $BA, $BC, $BE, $BE, $BE
-	.db	$BE, $BF, $C1, $C3, $C4, $C4, $C4, $C4
-	.db	$C6, $C8, $C9, $C9, $C9, $C9, $CB, $CE
-	.db	$CF, $CF, $CE, $CE, $D0, $D3, $D5, $D5
-	.db	$D4, $D3, $D5, $D8, $DA, $DB, $D9, $D8
-	.db	$DA, $DD, $E0, $E1, $DF, $DD, $DE, $E2
-	.db	$E6, $E7, $E5, $E1, $E2, $E7, $ED, $EF
-	.db	$EB, $E4, $E3, $EB, $F9, $FF, $EE, $C1
-INV_SAW9:
-	.db	$7F, $49, $1E, $06, $00, $08, $14, $1D
-	.db	$1F, $1B, $16, $12, $13, $18, $1D, $21
-	.db	$21, $1F, $1C, $1B, $1D, $21, $24, $26
-	.db	$26, $24, $23, $23, $26, $29, $2B, $2C
-	.db	$2C, $2B, $2A, $2B, $2E, $30, $32, $33
-	.db	$32, $31, $32, $33, $35, $38, $39, $39
-	.db	$39, $38, $39, $3B, $3D, $3F, $40, $40
-	.db	$3F, $3F, $40, $42, $44, $46, $46, $46
-	.db	$46, $47, $48, $4A, $4C, $4D, $4D, $4D
-	.db	$4D, $4E, $4F, $51, $53, $54, $54, $54
-	.db	$54, $55, $57, $59, $5A, $5A, $5A, $5B
-	.db	$5B, $5C, $5E, $60, $61, $61, $61, $61
-	.db	$62, $64, $65, $67, $68, $68, $68, $68
-	.db	$6A, $6B, $6D, $6E, $6F, $6F, $6F, $70
-	.db	$71, $72, $74, $75, $75, $75, $76, $77
-	.db	$78, $7A, $7B, $7C, $7C, $7C, $7D, $7E
-	.db	$7F, $81, $82, $83, $83, $83, $84, $85
-	.db	$87, $88, $89, $8A, $8A, $8A, $8B, $8D
-	.db	$8E, $8F, $90, $90, $90, $91, $92, $94
-	.db	$95, $97, $97, $97, $97, $98, $9A, $9B
-	.db	$9D, $9E, $9E, $9E, $9E, $9F, $A1, $A3
-	.db	$A4, $A4, $A5, $A5, $A5, $A6, $A8, $AA
-	.db	$AB, $AB, $AB, $AB, $AC, $AE, $B0, $B1
-	.db	$B2, $B2, $B2, $B2, $B3, $B5, $B7, $B8
-	.db	$B9, $B9, $B9, $B9, $BB, $BD, $BF, $C0
-	.db	$C0, $BF, $BF, $C0, $C2, $C4, $C6, $C7
-	.db	$C6, $C6, $C6, $C7, $CA, $CC, $CD, $CE
-	.db	$CD, $CC, $CD, $CF, $D1, $D4, $D5, $D4
-	.db	$D3, $D3, $D4, $D6, $D9, $DC, $DC, $DB
-	.db	$D9, $D9, $DB, $DE, $E2, $E4, $E3, $E0
-	.db	$DE, $DE, $E2, $E7, $EC, $ED, $E9, $E4
-	.db	$E0, $E2, $EB, $F7, $FF, $F9, $E1, $B6
-INV_SAW10:
-	.db	$7F, $54, $2E, $12, $03, $00, $06, $0F
-	.db	$19, $20, $21, $1F, $1B, $16, $14, $15
-	.db	$18, $1D, $22, $25, $25, $24, $21, $20
-	.db	$1F, $21, $24, $27, $2A, $2C, $2C, $2B
-	.db	$2A, $29, $29, $2B, $2E, $30, $33, $34
-	.db	$34, $33, $32, $32, $33, $35, $37, $39
-	.db	$3B, $3C, $3C, $3B, $3B, $3B, $3C, $3E
-	.db	$40, $42, $44, $44, $44, $44, $44, $44
-	.db	$46, $48, $4A, $4B, $4C, $4D, $4C, $4C
-	.db	$4D, $4D, $4F, $51, $53, $54, $55, $55
-	.db	$55, $55, $55, $57, $58, $5A, $5C, $5D
-	.db	$5D, $5D, $5D, $5E, $5E, $60, $61, $63
-	.db	$65, $65, $66, $66, $66, $66, $67, $69
-	.db	$6A, $6C, $6D, $6E, $6E, $6E, $6F, $6F
-	.db	$70, $72, $74, $75, $76, $77, $77, $77
-	.db	$77, $78, $79, $7B, $7D, $7E, $7F, $7F
-	.db	$7F, $80, $80, $81, $82, $84, $86, $87
-	.db	$88, $88, $88, $88, $89, $8A, $8B, $8D
-	.db	$8F, $90, $90, $91, $91, $91, $92, $93
-	.db	$95, $96, $98, $99, $99, $99, $99, $9A
-	.db	$9A, $9C, $9E, $9F, $A1, $A1, $A2, $A2
-	.db	$A2, $A2, $A3, $A5, $A7, $A8, $AA, $AA
-	.db	$AA, $AA, $AA, $AB, $AC, $AE, $B0, $B2
-	.db	$B2, $B3, $B3, $B2, $B3, $B4, $B5, $B7
-	.db	$B9, $BB, $BB, $BB, $BB, $BB, $BB, $BD
-	.db	$BF, $C1, $C3, $C4, $C4, $C4, $C3, $C3
-	.db	$C4, $C6, $C8, $CA, $CC, $CD, $CD, $CC
-	.db	$CB, $CB, $CC, $CF, $D1, $D4, $D6, $D6
-	.db	$D5, $D4, $D3, $D3, $D5, $D8, $DB, $DE
-	.db	$E0, $DF, $DE, $DB, $DA, $DA, $DD, $E2
-	.db	$E7, $EA, $EB, $E9, $E4, $E0, $DE, $DF
-	.db	$E6, $F0, $F9, $FF, $FC, $ED, $D1, $AB
-INV_SAW11:
-	.db	$7F, $5D, $3D, $23, $10, $04, $00, $02
-	.db	$08, $10, $19, $1F, $23, $24, $22, $1F
-	.db	$1C, $19, $17, $18, $1A, $1D, $21, $25
-	.db	$28, $2A, $2A, $29, $27, $26, $25, $25
-	.db	$26, $28, $2B, $2E, $31, $33, $33, $33
-	.db	$33, $32, $31, $31, $32, $33, $35, $38
-	.db	$3A, $3C, $3D, $3E, $3E, $3D, $3D, $3D
-	.db	$3D, $3E, $40, $42, $44, $46, $47, $48
-	.db	$49, $48, $48, $48, $48, $49, $4A, $4C
-	.db	$4E, $50, $52, $53, $53, $53, $53, $53
-	.db	$53, $54, $55, $56, $58, $5A, $5C, $5D
-	.db	$5E, $5E, $5E, $5E, $5E, $5F, $60, $61
-	.db	$62, $64, $66, $67, $68, $69, $69, $69
-	.db	$69, $6A, $6A, $6B, $6D, $6E, $70, $72
-	.db	$73, $74, $74, $74, $74, $75, $75, $76
-	.db	$77, $79, $7A, $7C, $7D, $7F, $7F, $7F
-	.db	$80, $80, $80, $80, $82, $83, $85, $86
-	.db	$88, $89, $8A, $8A, $8B, $8B, $8B, $8B
-	.db	$8C, $8D, $8F, $91, $92, $94, $95, $95
-	.db	$96, $96, $96, $96, $97, $98, $99, $9B
-	.db	$9D, $9E, $9F, $A0, $A1, $A1, $A1, $A1
-	.db	$A1, $A2, $A3, $A5, $A7, $A9, $AA, $AB
-	.db	$AC, $AC, $AC, $AC, $AC, $AC, $AD, $AF
-	.db	$B1, $B3, $B5, $B6, $B7, $B7, $B7, $B7
-	.db	$B6, $B7, $B8, $B9, $BB, $BD, $BF, $C1
-	.db	$C2, $C2, $C2, $C2, $C1, $C1, $C2, $C3
-	.db	$C5, $C7, $CA, $CC, $CD, $CE, $CE, $CD
-	.db	$CC, $CC, $CC, $CC, $CE, $D1, $D4, $D7
-	.db	$D9, $DA, $DA, $D9, $D8, $D6, $D5, $D5
-	.db	$D7, $DA, $DE, $E2, $E5, $E7, $E8, $E6
-	.db	$E3, $E0, $DD, $DB, $DC, $E0, $E6, $EF
-	.db	$F7, $FD, $FF, $FB, $EF, $DC, $C2, $A2
-INV_SAW12:
-	.db	$7F, $63, $49, $31, $1D, $0F, $05, $00
-	.db	$00, $03, $09, $10, $17, $1D, $22, $25
-	.db	$26, $25, $23, $20, $1E, $1B, $1A, $1A
-	.db	$1B, $1D, $21, $24, $28, $2B, $2D, $2E
-	.db	$2F, $2E, $2E, $2C, $2B, $2B, $2A, $2B
-	.db	$2D, $2F, $31, $34, $36, $38, $3A, $3B
-	.db	$3B, $3B, $3A, $3A, $39, $39, $3A, $3B
-	.db	$3C, $3E, $40, $43, $45, $46, $48, $48
-	.db	$48, $48, $48, $48, $48, $48, $49, $4A
-	.db	$4C, $4D, $4F, $51, $53, $54, $55, $56
-	.db	$56, $56, $56, $56, $56, $57, $57, $59
-	.db	$5A, $5C, $5E, $60, $61, $63, $63, $64
-	.db	$64, $64, $64, $64, $64, $65, $66, $68
-	.db	$69, $6B, $6D, $6E, $70, $71, $71, $72
-	.db	$72, $72, $72, $72, $73, $74, $75, $76
-	.db	$78, $7A, $7C, $7D, $7E, $7F, $7F, $7F
-	.db	$80, $80, $80, $80, $81, $82, $83, $85
-	.db	$87, $89, $8A, $8B, $8C, $8D, $8D, $8D
-	.db	$8D, $8D, $8E, $8E, $8F, $91, $92, $94
-	.db	$96, $97, $99, $9A, $9B, $9B, $9B, $9B
-	.db	$9B, $9B, $9C, $9C, $9E, $9F, $A1, $A3
-	.db	$A5, $A6, $A8, $A8, $A9, $A9, $A9, $A9
-	.db	$A9, $A9, $AA, $AB, $AC, $AE, $B0, $B2
-	.db	$B3, $B5, $B6, $B7, $B7, $B7, $B7, $B7
-	.db	$B7, $B7, $B7, $B9, $BA, $BC, $BF, $C1
-	.db	$C3, $C4, $C5, $C6, $C6, $C5, $C5, $C4
-	.db	$C4, $C4, $C5, $C7, $C9, $CB, $CE, $D0
-	.db	$D2, $D4, $D5, $D4, $D4, $D3, $D1, $D1
-	.db	$D0, $D1, $D2, $D4, $D7, $DB, $DE, $E2
-	.db	$E4, $E5, $E5, $E4, $E1, $DF, $DC, $DA
-	.db	$D9, $DA, $DD, $E2, $E8, $EF, $F6, $FC
-	.db	$FF, $FF, $FA, $F0, $E2, $CE, $B6, $9C
-INV_SAW13:
-	.db	$7F, $68, $52, $3D, $2B, $1C, $10, $07
-	.db	$02, $00, $01, $04, $09, $0F, $15, $1B
-	.db	$20, $24, $27, $28, $29, $28, $26, $24
-	.db	$22, $20, $1E, $1E, $1E, $1F, $20, $23
-	.db	$26, $29, $2C, $2F, $31, $33, $34, $35
-	.db	$35, $34, $33, $33, $32, $31, $31, $32
-	.db	$33, $34, $36, $38, $3A, $3D, $3F, $41
-	.db	$42, $44, $44, $44, $44, $44, $44, $43
-	.db	$43, $43, $44, $45, $46, $48, $4A, $4C
-	.db	$4E, $50, $51, $53, $54, $55, $55, $55
-	.db	$55, $55, $55, $55, $55, $56, $57, $58
-	.db	$59, $5B, $5D, $5F, $61, $62, $64, $65
-	.db	$65, $66, $66, $66, $66, $66, $66, $66
-	.db	$67, $68, $69, $6B, $6C, $6E, $70, $72
-	.db	$73, $75, $76, $76, $77, $77, $77, $77
-	.db	$77, $77, $78, $78, $79, $7B, $7C, $7E
-	.db	$80, $81, $83, $84, $86, $87, $87, $88
-	.db	$88, $88, $88, $88, $88, $89, $89, $8A
-	.db	$8C, $8D, $8F, $91, $93, $94, $96, $97
-	.db	$98, $99, $99, $99, $99, $99, $99, $99
-	.db	$9A, $9A, $9B, $9D, $9E, $A0, $A2, $A4
-	.db	$A6, $A7, $A8, $A9, $AA, $AA, $AA, $AA
-	.db	$AA, $AA, $AA, $AA, $AB, $AC, $AE, $AF
-	.db	$B1, $B3, $B5, $B7, $B9, $BA, $BB, $BC
-	.db	$BC, $BC, $BB, $BB, $BB, $BB, $BB, $BB
-	.db	$BD, $BE, $C0, $C2, $C5, $C7, $C9, $CB
-	.db	$CC, $CD, $CE, $CE, $CD, $CC, $CC, $CB
-	.db	$CA, $CA, $CB, $CC, $CE, $D0, $D3, $D6
-	.db	$D9, $DC, $DF, $E0, $E1, $E1, $E1, $DF
-	.db	$DD, $DB, $D9, $D7, $D6, $D7, $D8, $DB
-	.db	$DF, $E4, $EA, $F0, $F6, $FB, $FE, $FF
-	.db	$FD, $F8, $EF, $E3, $D4, $C2, $AD, $97
-INV_SAW14:
-	.db	$7F, $6D, $5B, $4A, $3B, $2C, $20, $15
-	.db	$0D, $07, $02, $00, $00, $01, $04, $08
-	.db	$0C, $11, $16, $1B, $20, $24, $27, $2A
-	.db	$2B, $2C, $2C, $2C, $2B, $29, $28, $26
-	.db	$25, $24, $23, $23, $23, $24, $25, $27
-	.db	$29, $2C, $2F, $31, $34, $37, $39, $3B
-	.db	$3C, $3D, $3E, $3E, $3E, $3E, $3D, $3D
-	.db	$3C, $3C, $3C, $3C, $3C, $3D, $3E, $3F
-	.db	$41, $43, $45, $47, $49, $4B, $4D, $4F
-	.db	$50, $51, $52, $53, $53, $53, $53, $53
-	.db	$53, $53, $53, $53, $53, $54, $55, $56
-	.db	$58, $59, $5B, $5D, $5F, $61, $63, $64
-	.db	$66, $67, $68, $68, $69, $69, $69, $69
-	.db	$69, $69, $69, $69, $6A, $6A, $6B, $6C
-	.db	$6E, $6F, $71, $73, $75, $76, $78, $7A
-	.db	$7B, $7D, $7E, $7E, $7F, $7F, $7F, $7F
-	.db	$80, $80, $80, $80, $80, $81, $81, $82
-	.db	$84, $85, $87, $89, $8A, $8C, $8E, $90
-	.db	$91, $93, $94, $95, $95, $96, $96, $96
-	.db	$96, $96, $96, $96, $96, $97, $97, $98
-	.db	$99, $9B, $9C, $9E, $A0, $A2, $A4, $A6
-	.db	$A7, $A9, $AA, $AB, $AC, $AC, $AC, $AC
-	.db	$AC, $AC, $AC, $AC, $AC, $AC, $AD, $AE
-	.db	$AF, $B0, $B2, $B4, $B6, $B8, $BA, $BC
-	.db	$BE, $C0, $C1, $C2, $C3, $C3, $C3, $C3
-	.db	$C3, $C2, $C2, $C1, $C1, $C1, $C1, $C2
-	.db	$C3, $C4, $C6, $C8, $CB, $CE, $D0, $D3
-	.db	$D6, $D8, $DA, $DB, $DC, $DC, $DC, $DB
-	.db	$DA, $D9, $D7, $D6, $D4, $D3, $D3, $D3
-	.db	$D4, $D5, $D8, $DB, $DF, $E4, $E9, $EE
-	.db	$F3, $F7, $FB, $FE, $FF, $FF, $FD, $F8
-	.db	$F2, $EA, $DF, $D3, $C4, $B5, $A4, $92
-INV_SAW15:
-	.db	$7F, $71, $62, $54, $46, $39, $2E, $23
-	.db	$1A, $12, $0C, $07, $03, $01, $00, $00
-	.db	$02, $04, $07, $0B, $0F, $13, $17, $1C
-	.db	$20, $24, $27, $2A, $2D, $2E, $30, $30
-	.db	$31, $30, $30, $2F, $2E, $2D, $2C, $2B
-	.db	$2A, $29, $29, $29, $29, $2A, $2B, $2C
-	.db	$2E, $30, $32, $34, $37, $39, $3C, $3E
-	.db	$40, $42, $44, $45, $46, $47, $48, $48
-	.db	$48, $48, $48, $48, $47, $47, $47, $47
-	.db	$47, $47, $48, $48, $49, $4B, $4C, $4E
-	.db	$4F, $51, $53, $55, $57, $59, $5B, $5D
-	.db	$5E, $60, $61, $62, $62, $63, $63, $63
-	.db	$64, $63, $63, $63, $63, $63, $64, $64
-	.db	$65, $65, $66, $67, $69, $6A, $6C, $6E
-	.db	$70, $71, $73, $75, $77, $79, $7A, $7B
-	.db	$7C, $7D, $7E, $7F, $7F, $7F, $7F, $7F
-	.db	$80, $80, $80, $80, $80, $80, $81, $82
-	.db	$83, $84, $85, $86, $88, $8A, $8C, $8E
-	.db	$8F, $91, $93, $95, $96, $98, $99, $9A
-	.db	$9A, $9B, $9B, $9C, $9C, $9C, $9C, $9C
-	.db	$9B, $9C, $9C, $9C, $9D, $9D, $9E, $9F
-	.db	$A1, $A2, $A4, $A6, $A8, $AA, $AC, $AE
-	.db	$B0, $B1, $B3, $B4, $B6, $B7, $B7, $B8
-	.db	$B8, $B8, $B8, $B8, $B8, $B7, $B7, $B7
-	.db	$B7, $B7, $B7, $B8, $B9, $BA, $BB, $BD
-	.db	$BF, $C1, $C3, $C6, $C8, $CB, $CD, $CF
-	.db	$D1, $D3, $D4, $D5, $D6, $D6, $D6, $D6
-	.db	$D5, $D4, $D3, $D2, $D1, $D0, $CF, $CF
-	.db	$CE, $CF, $CF, $D1, $D2, $D5, $D8, $DB
-	.db	$DF, $E3, $E8, $EC, $F0, $F4, $F8, $FB
-	.db	$FD, $FF, $FF, $FE, $FC, $F8, $F3, $ED
-	.db	$E5, $DC, $D1, $C6, $B9, $AB, $9D, $8E
-
-;*** Bandlimited square wavetables
-SQ_LIMIT0:
-	.db	$F2, $FB, $FC, $FD, $FE, $FE, $FE, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FE, $FE, $FE, $FD, $FC, $FB, $F2, $80
-	.db	$0D, $04, $03, $02, $01, $01, $01, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$01, $01, $01, $02, $03, $04, $0D, $7F
-SQ_LIMIT1:
-	.db	$F4, $FE, $FF, $FE, $FE, $FD, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FD, $FE, $FE, $FF, $FE, $F4, $80
-	.db	$0B, $01, $00, $01, $01, $02, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $02, $01, $01, $00, $01, $0B, $7F
-SQ_LIMIT2:
-	.db	$F6, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-	.db	$FF, $FF, $FF, $FF, $FF, $FF, $F6, $80
-	.db	$09, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $00, $00
-	.db	$00, $00, $00, $00, $00, $00, $09, $7F
-SQ_LIMIT3:
-	.db	$F6, $FE, $FF, $FE, $FF, $FE, $FF, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FE, $FE, $FE, $FE, $FE, $FE, $FE, $FE
-	.db	$FF, $FE, $FF, $FE, $FF, $FE, $F6, $80
-	.db	$09, $01, $00, $01, $00, $01, $00, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$01, $01, $01, $01, $01, $01, $01, $01
-	.db	$00, $01, $00, $01, $00, $01, $09, $7F
-SQ_LIMIT4:
-	.db	$F4, $FF, $FC, $FF, $FB, $FE, $FC, $FD
-	.db	$FD, $FC, $FE, $FC, $FE, $FD, $FD, $FE
-	.db	$FD, $FE, $FD, $FD, $FD, $FD, $FD, $FD
-	.db	$FD, $FD, $FD, $FD, $FD, $FD, $FD, $FD
-	.db	$FD, $FD, $FD, $FD, $FD, $FD, $FD, $FD
-	.db	$FD, $FD, $FD, $FD, $FD, $FD, $FD, $FD
-	.db	$FD, $FD, $FD, $FD, $FD, $FD, $FD, $FD
-	.db	$FD, $FD, $FD, $FD, $FD, $FD, $FD, $FD
-	.db	$FD, $FD, $FD, $FD, $FD, $FD, $FD, $FD
-	.db	$FD, $FD, $FD, $FD, $FD, $FD, $FD, $FD
-	.db	$FD, $FD, $FD, $FD, $FD, $FD, $FD, $FD
-	.db	$FD, $FD, $FD, $FD, $FD, $FD, $FD, $FD
-	.db	$FD, $FD, $FD, $FD, $FD, $FD, $FD, $FD
-	.db	$FD, $FD, $FD, $FD, $FD, $FE, $FD, $FE
-	.db	$FD, $FD, $FE, $FC, $FE, $FC, $FD, $FD
-	.db	$FC, $FE, $FB, $FF, $FC, $FF, $F4, $80
-	.db	$0B, $00, $03, $00, $04, $01, $03, $02
-	.db	$02, $03, $01, $03, $01, $02, $02, $01
-	.db	$02, $01, $02, $02, $02, $02, $02, $02
-	.db	$02, $02, $02, $02, $02, $02, $02, $02
-	.db	$02, $02, $02, $02, $02, $02, $02, $02
-	.db	$02, $02, $02, $02, $02, $02, $02, $02
-	.db	$02, $02, $02, $02, $02, $02, $02, $02
-	.db	$02, $02, $02, $02, $02, $02, $02, $02
-	.db	$02, $02, $02, $02, $02, $02, $02, $02
-	.db	$02, $02, $02, $02, $02, $02, $02, $02
-	.db	$02, $02, $02, $02, $02, $02, $02, $02
-	.db	$02, $02, $02, $02, $02, $02, $02, $02
-	.db	$02, $02, $02, $02, $02, $02, $02, $02
-	.db	$02, $02, $02, $02, $02, $01, $02, $01
-	.db	$02, $02, $01, $03, $01, $03, $02, $02
-	.db	$03, $01, $04, $00, $03, $00, $0B, $7F
-SQ_LIMIT5:
-	.db	$E9, $FF, $F2, $F7, $FA, $F4, $F7, $F9
-	.db	$F5, $F7, $F8, $F5, $F7, $F8, $F6, $F7
-	.db	$F8, $F6, $F7, $F8, $F6, $F7, $F8, $F6
-	.db	$F7, $F8, $F6, $F7, $F7, $F6, $F6, $F7
-	.db	$F7, $F6, $F7, $F7, $F6, $F7, $F7, $F6
-	.db	$F7, $F7, $F6, $F7, $F7, $F6, $F7, $F7
-	.db	$F6, $F7, $F7, $F6, $F7, $F7, $F6, $F7
-	.db	$F7, $F6, $F7, $F7, $F6, $F7, $F7, $F6
-	.db	$F7, $F7, $F6, $F7, $F7, $F6, $F7, $F7
-	.db	$F6, $F7, $F7, $F6, $F7, $F7, $F6, $F7
-	.db	$F7, $F6, $F7, $F7, $F6, $F7, $F7, $F6
-	.db	$F7, $F7, $F6, $F7, $F7, $F6, $F7, $F7
-	.db	$F6, $F6, $F7, $F7, $F6, $F8, $F7, $F6
-	.db	$F8, $F7, $F6, $F8, $F7, $F6, $F8, $F7
-	.db	$F6, $F8, $F7, $F5, $F8, $F7, $F5, $F9
-	.db	$F7, $F4, $FA, $F7, $F2, $FF, $E9, $80
-	.db	$16, $00, $0D, $08, $05, $0B, $08, $06
-	.db	$0A, $08, $07, $0A, $08, $07, $09, $08
-	.db	$07, $09, $08, $07, $09, $08, $07, $09
-	.db	$08, $07, $09, $08, $08, $09, $09, $08
-	.db	$08, $09, $08, $08, $09, $08, $08, $09
-	.db	$08, $08, $09, $08, $08, $09, $08, $08
-	.db	$09, $08, $08, $09, $08, $08, $09, $08
-	.db	$08, $09, $08, $08, $09, $08, $08, $09
-	.db	$08, $08, $09, $08, $08, $09, $08, $08
-	.db	$09, $08, $08, $09, $08, $08, $09, $08
-	.db	$08, $09, $08, $08, $09, $08, $08, $09
-	.db	$08, $08, $09, $08, $08, $09, $08, $08
-	.db	$09, $09, $08, $08, $09, $07, $08, $09
-	.db	$07, $08, $09, $07, $08, $09, $07, $08
-	.db	$09, $07, $08, $0A, $07, $08, $0A, $06
-	.db	$08, $0B, $05, $08, $0D, $00, $16, $7F
-SQ_LIMIT6:
-	.db	$DB, $FF, $F5, $EB, $F3, $F7, $F2, $EF
-	.db	$F3, $F5, $F1, $F0, $F4, $F4, $F1, $F1
-	.db	$F4, $F4, $F1, $F1, $F4, $F3, $F1, $F2
-	.db	$F4, $F3, $F1, $F2, $F3, $F3, $F1, $F2
-	.db	$F3, $F2, $F1, $F3, $F3, $F2, $F2, $F3
-	.db	$F3, $F2, $F2, $F3, $F3, $F2, $F2, $F3
-	.db	$F3, $F2, $F2, $F3, $F3, $F2, $F2, $F3
-	.db	$F3, $F2, $F2, $F3, $F2, $F2, $F2, $F3
-	.db	$F2, $F2, $F2, $F3, $F2, $F2, $F3, $F3
-	.db	$F2, $F2, $F3, $F3, $F2, $F2, $F3, $F3
-	.db	$F2, $F2, $F3, $F3, $F2, $F2, $F3, $F3
-	.db	$F2, $F2, $F3, $F3, $F1, $F2, $F3, $F2
-	.db	$F1, $F3, $F3, $F2, $F1, $F3, $F4, $F2
-	.db	$F1, $F3, $F4, $F1, $F1, $F4, $F4, $F1
-	.db	$F1, $F4, $F4, $F0, $F1, $F5, $F3, $EF
-	.db	$F2, $F7, $F3, $EB, $F5, $FF, $DB, $80
-	.db	$24, $00, $0A, $14, $0C, $08, $0D, $10
-	.db	$0C, $0A, $0E, $0F, $0B, $0B, $0E, $0E
-	.db	$0B, $0B, $0E, $0E, $0B, $0C, $0E, $0D
-	.db	$0B, $0C, $0E, $0D, $0C, $0C, $0E, $0D
-	.db	$0C, $0D, $0E, $0C, $0C, $0D, $0D, $0C
-	.db	$0C, $0D, $0D, $0C, $0C, $0D, $0D, $0C
-	.db	$0C, $0D, $0D, $0C, $0C, $0D, $0D, $0C
-	.db	$0C, $0D, $0D, $0C, $0D, $0D, $0D, $0C
-	.db	$0D, $0D, $0D, $0C, $0D, $0D, $0C, $0C
-	.db	$0D, $0D, $0C, $0C, $0D, $0D, $0C, $0C
-	.db	$0D, $0D, $0C, $0C, $0D, $0D, $0C, $0C
-	.db	$0D, $0D, $0C, $0C, $0E, $0D, $0C, $0D
-	.db	$0E, $0C, $0C, $0D, $0E, $0C, $0B, $0D
-	.db	$0E, $0C, $0B, $0E, $0E, $0B, $0B, $0E
-	.db	$0E, $0B, $0B, $0F, $0E, $0A, $0C, $10
-	.db	$0D, $08, $0C, $14, $0A, $00, $24, $7F
-SQ_LIMIT7:
-	.db	$CE, $FB, $FF, $F1, $E9, $EF, $F7, $F6
-	.db	$F0, $ED, $F1, $F5, $F4, $F0, $EF, $F2
-	.db	$F4, $F3, $F0, $F0, $F2, $F4, $F3, $F0
-	.db	$F0, $F2, $F3, $F2, $F0, $F0, $F2, $F3
-	.db	$F2, $F1, $F1, $F2, $F3, $F2, $F1, $F1
-	.db	$F2, $F3, $F2, $F1, $F1, $F2, $F3, $F2
-	.db	$F1, $F1, $F2, $F3, $F2, $F1, $F1, $F2
-	.db	$F3, $F1, $F1, $F1, $F3, $F3, $F1, $F1
-	.db	$F1, $F3, $F3, $F1, $F1, $F1, $F3, $F2
-	.db	$F1, $F1, $F2, $F3, $F2, $F1, $F1, $F2
-	.db	$F3, $F2, $F1, $F1, $F2, $F3, $F2, $F1
-	.db	$F1, $F2, $F3, $F2, $F1, $F1, $F2, $F3
-	.db	$F2, $F0, $F0, $F2, $F3, $F2, $F0, $F0
-	.db	$F3, $F4, $F2, $F0, $F0, $F3, $F4, $F2
-	.db	$EF, $F0, $F4, $F5, $F1, $ED, $F0, $F6
-	.db	$F7, $EF, $E9, $F1, $FF, $FB, $CE, $80
-	.db	$31, $04, $00, $0E, $16, $10, $08, $09
-	.db	$0F, $12, $0E, $0A, $0B, $0F, $10, $0D
-	.db	$0B, $0C, $0F, $0F, $0D, $0B, $0C, $0F
-	.db	$0F, $0D, $0C, $0D, $0F, $0F, $0D, $0C
-	.db	$0D, $0E, $0E, $0D, $0C, $0D, $0E, $0E
-	.db	$0D, $0C, $0D, $0E, $0E, $0D, $0C, $0D
-	.db	$0E, $0E, $0D, $0C, $0D, $0E, $0E, $0D
-	.db	$0C, $0E, $0E, $0E, $0C, $0C, $0E, $0E
-	.db	$0E, $0C, $0C, $0E, $0E, $0E, $0C, $0D
-	.db	$0E, $0E, $0D, $0C, $0D, $0E, $0E, $0D
-	.db	$0C, $0D, $0E, $0E, $0D, $0C, $0D, $0E
-	.db	$0E, $0D, $0C, $0D, $0E, $0E, $0D, $0C
-	.db	$0D, $0F, $0F, $0D, $0C, $0D, $0F, $0F
-	.db	$0C, $0B, $0D, $0F, $0F, $0C, $0B, $0D
-	.db	$10, $0F, $0B, $0A, $0E, $12, $0F, $09
-	.db	$08, $10, $16, $0E, $00, $04, $31, $7F
-SQ_LIMIT8:
-	.db	$C1, $EE, $FF, $F9, $EC, $E6, $E9, $F0
-	.db	$F5, $F3, $ED, $EA, $EB, $EF, $F2, $F1
-	.db	$EE, $EB, $EC, $EF, $F1, $F1, $EE, $EC
-	.db	$EC, $EF, $F1, $F0, $EE, $ED, $ED, $EE
-	.db	$F0, $F0, $EF, $ED, $ED, $EE, $F0, $F0
-	.db	$EF, $ED, $ED, $EE, $F0, $F0, $EF, $ED
-	.db	$ED, $EE, $EF, $F0, $EF, $EE, $ED, $EE
-	.db	$EF, $F0, $EF, $EE, $ED, $EE, $EF, $F0
-	.db	$EF, $EE, $ED, $EE, $EF, $F0, $EF, $EE
-	.db	$ED, $EE, $EF, $F0, $EF, $EE, $ED, $ED
-	.db	$EF, $F0, $F0, $EE, $ED, $ED, $EF, $F0
-	.db	$F0, $EE, $ED, $ED, $EF, $F0, $F0, $EE
-	.db	$ED, $ED, $EE, $F0, $F1, $EF, $EC, $EC
-	.db	$EE, $F1, $F1, $EF, $EC, $EB, $EE, $F1
-	.db	$F2, $EF, $EB, $EA, $ED, $F3, $F5, $F0
-	.db	$E9, $E6, $EC, $F9, $FF, $EE, $C1, $80
-	.db	$3E, $11, $00, $06, $13, $19, $16, $0F
-	.db	$0A, $0C, $12, $15, $14, $10, $0D, $0E
-	.db	$11, $14, $13, $10, $0E, $0E, $11, $13
-	.db	$13, $10, $0E, $0F, $11, $12, $12, $11
-	.db	$0F, $0F, $10, $12, $12, $11, $0F, $0F
-	.db	$10, $12, $12, $11, $0F, $0F, $10, $12
-	.db	$12, $11, $10, $0F, $10, $11, $12, $11
-	.db	$10, $0F, $10, $11, $12, $11, $10, $0F
-	.db	$10, $11, $12, $11, $10, $0F, $10, $11
-	.db	$12, $11, $10, $0F, $10, $11, $12, $12
-	.db	$10, $0F, $0F, $11, $12, $12, $10, $0F
-	.db	$0F, $11, $12, $12, $10, $0F, $0F, $11
-	.db	$12, $12, $11, $0F, $0E, $10, $13, $13
-	.db	$11, $0E, $0E, $10, $13, $14, $11, $0E
-	.db	$0D, $10, $14, $15, $12, $0C, $0A, $0F
-	.db	$16, $19, $13, $06, $00, $11, $3E, $7F
-SQ_LIMIT9:
-	.db	$B6, $E1, $F9, $FF, $F8, $ED, $E5, $E5
-	.db	$EA, $F0, $F4, $F3, $EF, $EA, $E8, $EA
-	.db	$ED, $F1, $F2, $F0, $ED, $EA, $EA, $EC
-	.db	$EF, $F0, $F0, $EE, $EC, $EB, $EB, $ED
-	.db	$EF, $F0, $EF, $ED, $EC, $EB, $EC, $EE
-	.db	$F0, $EF, $EE, $EC, $EB, $EC, $ED, $EF
-	.db	$EF, $EF, $ED, $EC, $EC, $ED, $EE, $EF
-	.db	$EF, $EE, $ED, $EC, $EC, $ED, $EF, $EF
-	.db	$EF, $ED, $EC, $EC, $ED, $EE, $EF, $EF
-	.db	$EE, $ED, $EC, $EC, $ED, $EF, $EF, $EF
-	.db	$ED, $EC, $EB, $EC, $EE, $EF, $F0, $EE
-	.db	$EC, $EB, $EC, $ED, $EF, $F0, $EF, $ED
-	.db	$EB, $EB, $EC, $EE, $F0, $F0, $EF, $EC
-	.db	$EA, $EA, $ED, $F0, $F2, $F1, $ED, $EA
-	.db	$E8, $EA, $EF, $F3, $F4, $F0, $EA, $E5
-	.db	$E5, $ED, $F8, $FF, $F9, $E1, $B6, $80
-	.db	$49, $1E, $06, $00, $07, $12, $1A, $1A
-	.db	$15, $0F, $0B, $0C, $10, $15, $17, $15
-	.db	$12, $0E, $0D, $0F, $12, $15, $15, $13
-	.db	$10, $0F, $0F, $11, $13, $14, $14, $12
-	.db	$10, $0F, $10, $12, $13, $14, $13, $11
-	.db	$0F, $10, $11, $13, $14, $13, $12, $10
-	.db	$10, $10, $12, $13, $13, $12, $11, $10
-	.db	$10, $11, $12, $13, $13, $12, $10, $10
-	.db	$10, $12, $13, $13, $12, $11, $10, $10
-	.db	$11, $12, $13, $13, $12, $10, $10, $10
-	.db	$12, $13, $14, $13, $11, $10, $0F, $11
-	.db	$13, $14, $13, $12, $10, $0F, $10, $12
-	.db	$14, $14, $13, $11, $0F, $0F, $10, $13
-	.db	$15, $15, $12, $0F, $0D, $0E, $12, $15
-	.db	$17, $15, $10, $0C, $0B, $0F, $15, $1A
-	.db	$1A, $12, $07, $00, $06, $1E, $49, $7F
-SQ_LIMIT10:
-	.db	$AA, $CF, $EB, $FA, $FF, $FB, $F3, $EA
-	.db	$E4, $E3, $E5, $EA, $EF, $F3, $F3, $F2
-	.db	$EE, $EA, $E8, $E7, $E9, $EC, $EF, $F1
-	.db	$F1, $EF, $ED, $EB, $E9, $E9, $EA, $EC
-	.db	$EF, $F0, $F0, $EE, $ED, $EB, $EA, $EA
-	.db	$EB, $ED, $EE, $EF, $EF, $EE, $EC, $EB
-	.db	$EA, $EA, $EB, $ED, $EE, $EF, $EF, $EE
-	.db	$EC, $EB, $EA, $EA, $EC, $ED, $EF, $EF
-	.db	$EF, $ED, $EC, $EA, $EA, $EB, $EC, $EE
-	.db	$EF, $EF, $EE, $ED, $EB, $EA, $EA, $EB
-	.db	$EC, $EE, $EF, $EF, $EE, $ED, $EB, $EA
-	.db	$EA, $EB, $ED, $EE, $F0, $F0, $EF, $EC
-	.db	$EA, $E9, $E9, $EB, $ED, $EF, $F1, $F1
-	.db	$EF, $EC, $E9, $E7, $E8, $EA, $EE, $F2
-	.db	$F3, $F3, $EF, $EA, $E5, $E3, $E4, $EA
-	.db	$F3, $FB, $FF, $FA, $EB, $CF, $AA, $80
-	.db	$55, $30, $14, $05, $00, $04, $0C, $15
-	.db	$1B, $1C, $1A, $15, $10, $0C, $0C, $0D
-	.db	$11, $15, $17, $18, $16, $13, $10, $0E
-	.db	$0E, $10, $12, $14, $16, $16, $15, $13
-	.db	$10, $0F, $0F, $11, $12, $14, $15, $15
-	.db	$14, $12, $11, $10, $10, $11, $13, $14
-	.db	$15, $15, $14, $12, $11, $10, $10, $11
-	.db	$13, $14, $15, $15, $13, $12, $10, $10
-	.db	$10, $12, $13, $15, $15, $14, $13, $11
-	.db	$10, $10, $11, $12, $14, $15, $15, $14
-	.db	$13, $11, $10, $10, $11, $12, $14, $15
-	.db	$15, $14, $12, $11, $0F, $0F, $10, $13
-	.db	$15, $16, $16, $14, $12, $10, $0E, $0E
-	.db	$10, $13, $16, $18, $17, $15, $11, $0D
-	.db	$0C, $0C, $10, $15, $1A, $1C, $1B, $15
-	.db	$0C, $04, $00, $05, $14, $30, $55, $7F
-SQ_LIMIT11:
-	.db	$A1, $BF, $D9, $ED, $F9, $FF, $FF, $FA
-	.db	$F4, $ED, $E7, $E3, $E2, $E4, $E7, $EC
-	.db	$F0, $F3, $F4, $F3, $F1, $EE, $EB, $E9
-	.db	$E7, $E7, $E8, $EA, $ED, $EF, $F1, $F1
-	.db	$F1, $EF, $ED, $EB, $E9, $E9, $E9, $EA
-	.db	$EB, $ED, $EF, $F0, $F0, $F0, $EE, $ED
-	.db	$EB, $EA, $E9, $E9, $EA, $EC, $EE, $EF
-	.db	$F0, $F0, $EF, $EE, $EC, $EB, $EA, $E9
-	.db	$EA, $EB, $EC, $EE, $EF, $F0, $F0, $EF
-	.db	$EE, $EC, $EA, $E9, $E9, $EA, $EB, $ED
-	.db	$EE, $F0, $F0, $F0, $EF, $ED, $EB, $EA
-	.db	$E9, $E9, $E9, $EB, $ED, $EF, $F1, $F1
-	.db	$F1, $EF, $ED, $EA, $E8, $E7, $E7, $E9
-	.db	$EB, $EE, $F1, $F3, $F4, $F3, $F0, $EC
-	.db	$E7, $E4, $E2, $E3, $E7, $ED, $F4, $FA
-	.db	$FF, $FF, $F9, $ED, $D9, $BF, $A1, $80
-	.db	$5E, $40, $26, $12, $06, $00, $00, $05
-	.db	$0B, $12, $18, $1C, $1D, $1B, $18, $13
-	.db	$0F, $0C, $0B, $0C, $0E, $11, $14, $16
-	.db	$18, $18, $17, $15, $12, $10, $0E, $0E
-	.db	$0E, $10, $12, $14, $16, $16, $16, $15
-	.db	$14, $12, $10, $0F, $0F, $0F, $11, $12
-	.db	$14, $15, $16, $16, $15, $13, $11, $10
-	.db	$0F, $0F, $10, $11, $13, $14, $15, $16
-	.db	$15, $14, $13, $11, $10, $0F, $0F, $10
-	.db	$11, $13, $15, $16, $16, $15, $14, $12
-	.db	$11, $0F, $0F, $0F, $10, $12, $14, $15
-	.db	$16, $16, $16, $14, $12, $10, $0E, $0E
-	.db	$0E, $10, $12, $15, $17, $18, $18, $16
-	.db	$14, $11, $0E, $0C, $0B, $0C, $0F, $13
-	.db	$18, $1B, $1D, $1C, $18, $12, $0B, $05
-	.db	$00, $00, $06, $12, $26, $40, $5E, $7F
-SQ_LIMIT12:
-	.db	$9A, $B4, $CA, $DE, $ED, $F7, $FD, $FF
-	.db	$FE, $FA, $F4, $EF, $E9, $E5, $E2, $E1
-	.db	$E2, $E4, $E7, $EB, $EE, $F1, $F3, $F3
-	.db	$F3, $F1, $EF, $EC, $EA, $E8, $E6, $E6
-	.db	$E6, $E8, $E9, $EC, $EE, $EF, $F1, $F1
-	.db	$F1, $EF, $EE, $EC, $EA, $E9, $E8, $E7
-	.db	$E8, $E9, $EA, $EC, $ED, $EF, $F0, $F0
-	.db	$F0, $EF, $EE, $EC, $EA, $E9, $E8, $E8
-	.db	$E8, $E9, $EA, $EC, $EE, $EF, $F0, $F0
-	.db	$F0, $EF, $ED, $EC, $EA, $E9, $E8, $E7
-	.db	$E8, $E9, $EA, $EC, $EE, $EF, $F1, $F1
-	.db	$F1, $EF, $EE, $EC, $E9, $E8, $E6, $E6
-	.db	$E6, $E8, $EA, $EC, $EF, $F1, $F3, $F3
-	.db	$F3, $F1, $EE, $EB, $E7, $E4, $E2, $E1
-	.db	$E2, $E5, $E9, $EF, $F4, $FA, $FE, $FF
-	.db	$FD, $F7, $ED, $DE, $CA, $B4, $9A, $80
-	.db	$65, $4B, $35, $21, $12, $08, $02, $00
-	.db	$01, $05, $0B, $10, $16, $1A, $1D, $1E
-	.db	$1D, $1B, $18, $14, $11, $0E, $0C, $0C
-	.db	$0C, $0E, $10, $13, $15, $17, $19, $19
-	.db	$19, $17, $16, $13, $11, $10, $0E, $0E
-	.db	$0E, $10, $11, $13, $15, $16, $17, $18
-	.db	$17, $16, $15, $13, $12, $10, $0F, $0F
-	.db	$0F, $10, $11, $13, $15, $16, $17, $17
-	.db	$17, $16, $15, $13, $11, $10, $0F, $0F
-	.db	$0F, $10, $12, $13, $15, $16, $17, $18
-	.db	$17, $16, $15, $13, $11, $10, $0E, $0E
-	.db	$0E, $10, $11, $13, $16, $17, $19, $19
-	.db	$19, $17, $15, $13, $10, $0E, $0C, $0C
-	.db	$0C, $0E, $11, $14, $18, $1B, $1D, $1E
-	.db	$1D, $1A, $16, $10, $0B, $05, $01, $00
-	.db	$02, $08, $12, $21, $35, $4B, $65, $7F
-SQ_LIMIT13:
-	.db	$97, $AD, $C2, $D5, $E4, $F0, $F8, $FD
-	.db	$FF, $FE, $FB, $F7, $F2, $ED, $E8, $E5
-	.db	$E2, $E1, $E1, $E3, $E5, $E8, $EB, $EE
-	.db	$F1, $F2, $F3, $F3, $F2, $F1, $EF, $EC
-	.db	$EA, $E8, $E7, $E6, $E6, $E6, $E8, $E9
-	.db	$EB, $ED, $EF, $F0, $F1, $F1, $F1, $F0
-	.db	$EE, $EC, $EB, $E9, $E8, $E7, $E7, $E7
-	.db	$E8, $E9, $EB, $ED, $EE, $EF, $F0, $F1
-	.db	$F0, $EF, $EE, $ED, $EB, $E9, $E8, $E7
-	.db	$E7, $E7, $E8, $E9, $EB, $EC, $EE, $F0
-	.db	$F1, $F1, $F1, $F0, $EF, $ED, $EB, $E9
-	.db	$E8, $E6, $E6, $E6, $E7, $E8, $EA, $EC
-	.db	$EF, $F1, $F2, $F3, $F3, $F2, $F1, $EE
-	.db	$EB, $E8, $E5, $E3, $E1, $E1, $E2, $E5
-	.db	$E8, $ED, $F2, $F7, $FB, $FE, $FF, $FD
-	.db	$F8, $F0, $E4, $D5, $C2, $AD, $97, $80
-	.db	$68, $52, $3D, $2A, $1B, $0F, $07, $02
-	.db	$00, $01, $04, $08, $0D, $12, $17, $1A
-	.db	$1D, $1E, $1E, $1C, $1A, $17, $14, $11
-	.db	$0E, $0D, $0C, $0C, $0D, $0E, $10, $13
-	.db	$15, $17, $18, $19, $19, $19, $17, $16
-	.db	$14, $12, $10, $0F, $0E, $0E, $0E, $0F
-	.db	$11, $13, $14, $16, $17, $18, $18, $18
-	.db	$17, $16, $14, $12, $11, $10, $0F, $0E
-	.db	$0F, $10, $11, $12, $14, $16, $17, $18
-	.db	$18, $18, $17, $16, $14, $13, $11, $0F
-	.db	$0E, $0E, $0E, $0F, $10, $12, $14, $16
-	.db	$17, $19, $19, $19, $18, $17, $15, $13
-	.db	$10, $0E, $0D, $0C, $0C, $0D, $0E, $11
-	.db	$14, $17, $1A, $1C, $1E, $1E, $1D, $1A
-	.db	$17, $12, $0D, $08, $04, $01, $00, $02
-	.db	$07, $0F, $1B, $2A, $3D, $52, $68, $7F
-SQ_LIMIT14:
-	.db	$90, $A1, $B1, $BF, $CD, $D9, $E4, $ED
-	.db	$F4, $F9, $FD, $FF, $FF, $FE, $FC, $F9
-	.db	$F6, $F2, $EF, $EB, $E8, $E5, $E3, $E1
-	.db	$E0, $E0, $E1, $E2, $E4, $E6, $E8, $EB
-	.db	$ED, $EF, $F1, $F2, $F3, $F4, $F4, $F3
-	.db	$F2, $F1, $EF, $ED, $EB, $EA, $E8, $E7
-	.db	$E5, $E5, $E4, $E5, $E5, $E6, $E7, $E9
-	.db	$EA, $EC, $EE, $EF, $F0, $F1, $F2, $F2
-	.db	$F2, $F1, $F0, $EF, $EE, $EC, $EA, $E9
-	.db	$E7, $E6, $E5, $E5, $E4, $E5, $E5, $E7
-	.db	$E8, $EA, $EB, $ED, $EF, $F1, $F2, $F3
-	.db	$F4, $F4, $F3, $F2, $F1, $EF, $ED, $EB
-	.db	$E8, $E6, $E4, $E2, $E1, $E0, $E0, $E1
-	.db	$E3, $E5, $E8, $EB, $EF, $F2, $F6, $F9
-	.db	$FC, $FE, $FF, $FF, $FD, $F9, $F4, $ED
-	.db	$E4, $D9, $CD, $BF, $B1, $A1, $90, $80
-	.db	$6F, $5E, $4E, $40, $32, $26, $1B, $12
-	.db	$0B, $06, $02, $00, $00, $01, $03, $06
-	.db	$09, $0D, $10, $14, $17, $1A, $1C, $1E
-	.db	$1F, $1F, $1E, $1D, $1B, $19, $17, $14
-	.db	$12, $10, $0E, $0D, $0C, $0B, $0B, $0C
-	.db	$0D, $0E, $10, $12, $14, $15, $17, $18
-	.db	$1A, $1A, $1B, $1A, $1A, $19, $18, $16
-	.db	$15, $13, $11, $10, $0F, $0E, $0D, $0D
-	.db	$0D, $0E, $0F, $10, $11, $13, $15, $16
-	.db	$18, $19, $1A, $1A, $1B, $1A, $1A, $18
-	.db	$17, $15, $14, $12, $10, $0E, $0D, $0C
-	.db	$0B, $0B, $0C, $0D, $0E, $10, $12, $14
-	.db	$17, $19, $1B, $1D, $1E, $1F, $1F, $1E
-	.db	$1C, $1A, $17, $14, $10, $0D, $09, $06
-	.db	$03, $01, $00, $00, $02, $06, $0B, $12
-	.db	$1B, $26, $32, $40, $4E, $5E, $6F, $7F
-SQ_LIMIT15:
-	.db	$8D, $9A, $A7, $B4, $BF, $CA, $D4, $DE
-	.db	$E6, $ED, $F2, $F7, $FB, $FD, $FF, $FF
-	.db	$FF, $FD, $FC, $F9, $F7, $F4, $F1, $EE
-	.db	$EB, $E8, $E6, $E3, $E2, $E1, $E0, $E0
-	.db	$E0, $E1, $E2, $E3, $E5, $E6, $E8, $EA
-	.db	$EC, $EE, $F0, $F2, $F3, $F4, $F4, $F4
-	.db	$F4, $F4, $F3, $F2, $F0, $EF, $ED, $EB
-	.db	$EA, $E8, $E7, $E5, $E4, $E3, $E3, $E3
-	.db	$E3, $E3, $E4, $E5, $E7, $E8, $EA, $EB
-	.db	$ED, $EF, $F0, $F2, $F3, $F4, $F4, $F4
-	.db	$F4, $F4, $F3, $F2, $F0, $EE, $EC, $EA
-	.db	$E8, $E6, $E5, $E3, $E2, $E1, $E0, $E0
-	.db	$E0, $E1, $E2, $E3, $E6, $E8, $EB, $EE
-	.db	$F1, $F4, $F7, $F9, $FC, $FD, $FF, $FF
-	.db	$FF, $FD, $FB, $F7, $F2, $ED, $E6, $DE
-	.db	$D4, $CA, $BF, $B4, $A7, $9A, $8D, $80
-	.db	$72, $65, $58, $4B, $40, $35, $2B, $21
-	.db	$19, $12, $0D, $08, $04, $02, $00, $00
-	.db	$00, $02, $03, $06, $08, $0B, $0E, $11
-	.db	$14, $17, $19, $1C, $1D, $1E, $1F, $1F
-	.db	$1F, $1E, $1D, $1C, $1A, $19, $17, $15
-	.db	$13, $11, $0F, $0D, $0C, $0B, $0B, $0B
-	.db	$0B, $0B, $0C, $0D, $0F, $10, $12, $14
-	.db	$15, $17, $18, $1A, $1B, $1C, $1C, $1C
-	.db	$1C, $1C, $1B, $1A, $18, $17, $15, $14
-	.db	$12, $10, $0F, $0D, $0C, $0B, $0B, $0B
-	.db	$0B, $0B, $0C, $0D, $0F, $11, $13, $15
-	.db	$17, $19, $1A, $1C, $1D, $1E, $1F, $1F
-	.db	$1F, $1E, $1D, $1C, $19, $17, $14, $11
-	.db	$0E, $0B, $08, $06, $03, $02, $00, $00
-	.db	$00, $02, $04, $08, $0D, $12, $19, $21
-	.db	$2B, $35, $40, $4B, $58, $65, $72, $7F
-
-;*** Bandlimited triangle wavetables
-TRI_LIMIT0:
-	.db	$82, $84, $86, $88, $8A, $8C, $8E, $90
-	.db	$92, $94, $96, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A6, $A8, $AA, $AC, $AE, $B0
-	.db	$B2, $B4, $B6, $B8, $BA, $BC, $BE, $C0
-	.db	$C2, $C4, $C6, $C8, $CA, $CC, $CE, $D0
-	.db	$D2, $D4, $D6, $D8, $DA, $DC, $DE, $E0
-	.db	$E2, $E4, $E6, $E8, $EA, $EC, $EE, $F0
-	.db	$F2, $F4, $F6, $F8, $FA, $FC, $FE, $FF
-	.db	$FE, $FC, $FA, $F8, $F6, $F4, $F2, $F0
-	.db	$EE, $EC, $EA, $E8, $E6, $E4, $E2, $E0
-	.db	$DE, $DC, $DA, $D8, $D6, $D4, $D2, $D0
-	.db	$CE, $CC, $CA, $C8, $C6, $C4, $C2, $C0
-	.db	$BE, $BC, $BA, $B8, $B6, $B4, $B2, $B0
-	.db	$AE, $AC, $AA, $A8, $A6, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $96, $94, $92, $90
-	.db	$8E, $8C, $8A, $88, $86, $84, $82, $80
-	.db	$7D, $7B, $79, $77, $75, $73, $71, $6F
-	.db	$6D, $6B, $69, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $59, $57, $55, $53, $51, $4F
-	.db	$4D, $4B, $49, $47, $45, $43, $41, $3F
-	.db	$3D, $3B, $39, $37, $35, $33, $31, $2F
-	.db	$2D, $2B, $29, $27, $25, $23, $21, $1F
-	.db	$1D, $1B, $19, $17, $15, $13, $11, $0F
-	.db	$0D, $0B, $09, $07, $05, $03, $01, $00
-	.db	$01, $03, $05, $07, $09, $0B, $0D, $0F
-	.db	$11, $13, $15, $17, $19, $1B, $1D, $1F
-	.db	$21, $23, $25, $27, $29, $2B, $2D, $2F
-	.db	$31, $33, $35, $37, $39, $3B, $3D, $3F
-	.db	$41, $43, $45, $47, $49, $4B, $4D, $4F
-	.db	$51, $53, $55, $57, $59, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $69, $6B, $6D, $6F
-	.db	$71, $73, $75, $77, $79, $7B, $7D, $80
-TRI_LIMIT1:
-	.db	$82, $84, $86, $88, $8A, $8C, $8E, $90
-	.db	$92, $94, $96, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A6, $A8, $AA, $AC, $AE, $B0
-	.db	$B2, $B4, $B6, $B8, $BA, $BC, $BE, $C0
-	.db	$C2, $C4, $C6, $C8, $CA, $CC, $CE, $D0
-	.db	$D2, $D4, $D6, $D8, $DA, $DC, $DE, $E0
-	.db	$E2, $E4, $E6, $E8, $EA, $EC, $EE, $F0
-	.db	$F2, $F4, $F6, $F8, $FA, $FC, $FE, $FF
-	.db	$FE, $FC, $FA, $F8, $F6, $F4, $F2, $F0
-	.db	$EE, $EC, $EA, $E8, $E6, $E4, $E2, $E0
-	.db	$DE, $DC, $DA, $D8, $D6, $D4, $D2, $D0
-	.db	$CE, $CC, $CA, $C8, $C6, $C4, $C2, $C0
-	.db	$BE, $BC, $BA, $B8, $B6, $B4, $B2, $B0
-	.db	$AE, $AC, $AA, $A8, $A6, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $96, $94, $92, $90
-	.db	$8E, $8C, $8A, $88, $86, $84, $82, $80
-	.db	$7D, $7B, $79, $77, $75, $73, $71, $6F
-	.db	$6D, $6B, $69, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $59, $57, $55, $53, $51, $4F
-	.db	$4D, $4B, $49, $47, $45, $43, $41, $3F
-	.db	$3D, $3B, $39, $37, $35, $33, $31, $2F
-	.db	$2D, $2B, $29, $27, $25, $23, $21, $1F
-	.db	$1D, $1B, $19, $17, $15, $13, $11, $0F
-	.db	$0D, $0B, $09, $07, $05, $03, $01, $00
-	.db	$01, $03, $05, $07, $09, $0B, $0D, $0F
-	.db	$11, $13, $15, $17, $19, $1B, $1D, $1F
-	.db	$21, $23, $25, $27, $29, $2B, $2D, $2F
-	.db	$31, $33, $35, $37, $39, $3B, $3D, $3F
-	.db	$41, $43, $45, $47, $49, $4B, $4D, $4F
-	.db	$51, $53, $55, $57, $59, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $69, $6B, $6D, $6F
-	.db	$71, $73, $75, $77, $79, $7B, $7D, $80
-TRI_LIMIT2:
-	.db	$82, $84, $86, $88, $8A, $8C, $8E, $90
-	.db	$92, $94, $96, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A6, $A8, $AA, $AC, $AE, $B0
-	.db	$B2, $B4, $B6, $B8, $BA, $BC, $BE, $C0
-	.db	$C2, $C4, $C6, $C8, $CA, $CC, $CE, $D0
-	.db	$D2, $D4, $D6, $D8, $DA, $DC, $DE, $E0
-	.db	$E2, $E4, $E6, $E8, $EA, $EC, $EE, $F0
-	.db	$F2, $F4, $F6, $F8, $FA, $FC, $FE, $FF
-	.db	$FE, $FC, $FA, $F8, $F6, $F4, $F2, $F0
-	.db	$EE, $EC, $EA, $E8, $E6, $E4, $E2, $E0
-	.db	$DE, $DC, $DA, $D8, $D6, $D4, $D2, $D0
-	.db	$CE, $CC, $CA, $C8, $C6, $C4, $C2, $C0
-	.db	$BE, $BC, $BA, $B8, $B6, $B4, $B2, $B0
-	.db	$AE, $AC, $AA, $A8, $A6, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $96, $94, $92, $90
-	.db	$8E, $8C, $8A, $88, $86, $84, $82, $80
-	.db	$7D, $7B, $79, $77, $75, $73, $71, $6F
-	.db	$6D, $6B, $69, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $59, $57, $55, $53, $51, $4F
-	.db	$4D, $4B, $49, $47, $45, $43, $41, $3F
-	.db	$3D, $3B, $39, $37, $35, $33, $31, $2F
-	.db	$2D, $2B, $29, $27, $25, $23, $21, $1F
-	.db	$1D, $1B, $19, $17, $15, $13, $11, $0F
-	.db	$0D, $0B, $09, $07, $05, $03, $01, $00
-	.db	$01, $03, $05, $07, $09, $0B, $0D, $0F
-	.db	$11, $13, $15, $17, $19, $1B, $1D, $1F
-	.db	$21, $23, $25, $27, $29, $2B, $2D, $2F
-	.db	$31, $33, $35, $37, $39, $3B, $3D, $3F
-	.db	$41, $43, $45, $47, $49, $4B, $4D, $4F
-	.db	$51, $53, $55, $57, $59, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $69, $6B, $6D, $6F
-	.db	$71, $73, $75, $77, $79, $7B, $7D, $80
-TRI_LIMIT3:
-	.db	$82, $84, $86, $88, $8A, $8C, $8E, $90
-	.db	$92, $94, $96, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A6, $A8, $AA, $AC, $AE, $B0
-	.db	$B2, $B4, $B6, $B8, $BA, $BC, $BE, $C0
-	.db	$C2, $C4, $C6, $C8, $CA, $CC, $CE, $D0
-	.db	$D2, $D4, $D6, $D8, $DA, $DC, $DE, $E0
-	.db	$E2, $E4, $E6, $E8, $EA, $EC, $EE, $F0
-	.db	$F2, $F4, $F6, $F8, $FA, $FC, $FE, $FF
-	.db	$FE, $FC, $FA, $F8, $F6, $F4, $F2, $F0
-	.db	$EE, $EC, $EA, $E8, $E6, $E4, $E2, $E0
-	.db	$DE, $DC, $DA, $D8, $D6, $D4, $D2, $D0
-	.db	$CE, $CC, $CA, $C8, $C6, $C4, $C2, $C0
-	.db	$BE, $BC, $BA, $B8, $B6, $B4, $B2, $B0
-	.db	$AE, $AC, $AA, $A8, $A6, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $96, $94, $92, $90
-	.db	$8E, $8C, $8A, $88, $86, $84, $82, $80
-	.db	$7D, $7B, $79, $77, $75, $73, $71, $6F
-	.db	$6D, $6B, $69, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $59, $57, $55, $53, $51, $4F
-	.db	$4D, $4B, $49, $47, $45, $43, $41, $3F
-	.db	$3D, $3B, $39, $37, $35, $33, $31, $2F
-	.db	$2D, $2B, $29, $27, $25, $23, $21, $1F
-	.db	$1D, $1B, $19, $17, $15, $13, $11, $0F
-	.db	$0D, $0B, $09, $07, $05, $03, $01, $00
-	.db	$01, $03, $05, $07, $09, $0B, $0D, $0F
-	.db	$11, $13, $15, $17, $19, $1B, $1D, $1F
-	.db	$21, $23, $25, $27, $29, $2B, $2D, $2F
-	.db	$31, $33, $35, $37, $39, $3B, $3D, $3F
-	.db	$41, $43, $45, $47, $49, $4B, $4D, $4F
-	.db	$51, $53, $55, $57, $59, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $69, $6B, $6D, $6F
-	.db	$71, $73, $75, $77, $79, $7B, $7D, $80
-TRI_LIMIT4:
-	.db	$82, $84, $86, $88, $8A, $8C, $8E, $90
-	.db	$92, $94, $96, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A6, $A8, $AA, $AC, $AE, $B0
-	.db	$B2, $B4, $B6, $B8, $BA, $BC, $BE, $C0
-	.db	$C2, $C4, $C6, $C8, $CA, $CC, $CE, $D0
-	.db	$D2, $D4, $D6, $D8, $DA, $DC, $DE, $E0
-	.db	$E2, $E4, $E6, $E8, $EA, $EC, $EE, $F0
-	.db	$F2, $F4, $F6, $F8, $FA, $FC, $FE, $FF
-	.db	$FE, $FC, $FA, $F8, $F6, $F4, $F2, $F0
-	.db	$EE, $EC, $EA, $E8, $E6, $E4, $E2, $E0
-	.db	$DE, $DC, $DA, $D8, $D6, $D4, $D2, $D0
-	.db	$CE, $CC, $CA, $C8, $C6, $C4, $C2, $C0
-	.db	$BE, $BC, $BA, $B8, $B6, $B4, $B2, $B0
-	.db	$AE, $AC, $AA, $A8, $A6, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $96, $94, $92, $90
-	.db	$8E, $8C, $8A, $88, $86, $84, $82, $80
-	.db	$7D, $7B, $79, $77, $75, $73, $71, $6F
-	.db	$6D, $6B, $69, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $59, $57, $55, $53, $51, $4F
-	.db	$4D, $4B, $49, $47, $45, $43, $41, $3F
-	.db	$3D, $3B, $39, $37, $35, $33, $31, $2F
-	.db	$2D, $2B, $29, $27, $25, $23, $21, $1F
-	.db	$1D, $1B, $19, $17, $15, $13, $11, $0F
-	.db	$0D, $0B, $09, $07, $05, $03, $01, $00
-	.db	$01, $03, $05, $07, $09, $0B, $0D, $0F
-	.db	$11, $13, $15, $17, $19, $1B, $1D, $1F
-	.db	$21, $23, $25, $27, $29, $2B, $2D, $2F
-	.db	$31, $33, $35, $37, $39, $3B, $3D, $3F
-	.db	$41, $43, $45, $47, $49, $4B, $4D, $4F
-	.db	$51, $53, $55, $57, $59, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $69, $6B, $6D, $6F
-	.db	$71, $73, $75, $77, $79, $7B, $7D, $80
-TRI_LIMIT5:
-	.db	$82, $84, $86, $88, $8A, $8C, $8E, $90
-	.db	$92, $94, $96, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A6, $A8, $AA, $AC, $AE, $B0
-	.db	$B2, $B4, $B6, $B8, $BA, $BC, $BE, $C0
-	.db	$C2, $C4, $C6, $C8, $CA, $CC, $CE, $D0
-	.db	$D2, $D4, $D6, $D8, $DA, $DC, $DE, $E0
-	.db	$E2, $E4, $E6, $E8, $EA, $EC, $EE, $F0
-	.db	$F2, $F4, $F6, $F8, $FA, $FC, $FE, $FF
-	.db	$FE, $FC, $FA, $F8, $F6, $F4, $F2, $F0
-	.db	$EE, $EC, $EA, $E8, $E6, $E4, $E2, $E0
-	.db	$DE, $DC, $DA, $D8, $D6, $D4, $D2, $D0
-	.db	$CE, $CC, $CA, $C8, $C6, $C4, $C2, $C0
-	.db	$BE, $BC, $BA, $B8, $B6, $B4, $B2, $B0
-	.db	$AE, $AC, $AA, $A8, $A6, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $96, $94, $92, $90
-	.db	$8E, $8C, $8A, $88, $86, $84, $82, $80
-	.db	$7D, $7B, $79, $77, $75, $73, $71, $6F
-	.db	$6D, $6B, $69, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $59, $57, $55, $53, $51, $4F
-	.db	$4D, $4B, $49, $47, $45, $43, $41, $3F
-	.db	$3D, $3B, $39, $37, $35, $33, $31, $2F
-	.db	$2D, $2B, $29, $27, $25, $23, $21, $1F
-	.db	$1D, $1B, $19, $17, $15, $13, $11, $0F
-	.db	$0D, $0B, $09, $07, $05, $03, $01, $00
-	.db	$01, $03, $05, $07, $09, $0B, $0D, $0F
-	.db	$11, $13, $15, $17, $19, $1B, $1D, $1F
-	.db	$21, $23, $25, $27, $29, $2B, $2D, $2F
-	.db	$31, $33, $35, $37, $39, $3B, $3D, $3F
-	.db	$41, $43, $45, $47, $49, $4B, $4D, $4F
-	.db	$51, $53, $55, $57, $59, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $69, $6B, $6D, $6F
-	.db	$71, $73, $75, $77, $79, $7B, $7D, $80
-TRI_LIMIT6:
-	.db	$82, $84, $86, $88, $8A, $8C, $8E, $90
-	.db	$92, $94, $96, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A6, $A8, $AA, $AC, $AE, $B0
-	.db	$B2, $B4, $B6, $B8, $BA, $BC, $BE, $C0
-	.db	$C2, $C4, $C6, $C8, $CA, $CC, $CE, $D0
-	.db	$D2, $D4, $D6, $D8, $DA, $DC, $DE, $E0
-	.db	$E2, $E4, $E6, $E8, $EA, $EC, $EE, $F0
-	.db	$F2, $F4, $F6, $F8, $FA, $FC, $FE, $FF
-	.db	$FE, $FC, $FA, $F8, $F6, $F4, $F2, $F0
-	.db	$EE, $EC, $EA, $E8, $E6, $E4, $E2, $E0
-	.db	$DE, $DC, $DA, $D8, $D6, $D4, $D2, $D0
-	.db	$CE, $CC, $CA, $C8, $C6, $C4, $C2, $C0
-	.db	$BE, $BC, $BA, $B8, $B6, $B4, $B2, $B0
-	.db	$AE, $AC, $AA, $A8, $A6, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $96, $94, $92, $90
-	.db	$8E, $8C, $8A, $88, $86, $84, $82, $80
-	.db	$7D, $7B, $79, $77, $75, $73, $71, $6F
-	.db	$6D, $6B, $69, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $59, $57, $55, $53, $51, $4F
-	.db	$4D, $4B, $49, $47, $45, $43, $41, $3F
-	.db	$3D, $3B, $39, $37, $35, $33, $31, $2F
-	.db	$2D, $2B, $29, $27, $25, $23, $21, $1F
-	.db	$1D, $1B, $19, $17, $15, $13, $11, $0F
-	.db	$0D, $0B, $09, $07, $05, $03, $01, $00
-	.db	$01, $03, $05, $07, $09, $0B, $0D, $0F
-	.db	$11, $13, $15, $17, $19, $1B, $1D, $1F
-	.db	$21, $23, $25, $27, $29, $2B, $2D, $2F
-	.db	$31, $33, $35, $37, $39, $3B, $3D, $3F
-	.db	$41, $43, $45, $47, $49, $4B, $4D, $4F
-	.db	$51, $53, $55, $57, $59, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $69, $6B, $6D, $6F
-	.db	$71, $73, $75, $77, $79, $7B, $7D, $80
-TRI_LIMIT7:
-	.db	$81, $84, $86, $88, $8A, $8C, $8E, $90
-	.db	$92, $94, $96, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A6, $A8, $AA, $AC, $AE, $B0
-	.db	$B2, $B4, $B6, $B8, $BA, $BC, $BE, $C0
-	.db	$C2, $C4, $C6, $C8, $CA, $CC, $CE, $D0
-	.db	$D2, $D4, $D6, $D8, $DA, $DC, $DE, $E0
-	.db	$E2, $E4, $E6, $E8, $EA, $EC, $EE, $F0
-	.db	$F2, $F4, $F6, $F8, $FA, $FC, $FE, $FF
-	.db	$FE, $FC, $FA, $F8, $F6, $F4, $F2, $F0
-	.db	$EE, $EC, $EA, $E8, $E6, $E4, $E2, $E0
-	.db	$DE, $DC, $DA, $D8, $D6, $D4, $D2, $D0
-	.db	$CE, $CC, $CA, $C8, $C6, $C4, $C2, $C0
-	.db	$BE, $BC, $BA, $B8, $B6, $B4, $B2, $B0
-	.db	$AE, $AC, $AA, $A8, $A6, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $96, $94, $92, $90
-	.db	$8E, $8C, $8A, $88, $86, $84, $81, $80
-	.db	$7E, $7B, $79, $77, $75, $73, $71, $6F
-	.db	$6D, $6B, $69, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $59, $57, $55, $53, $51, $4F
-	.db	$4D, $4B, $49, $47, $45, $43, $41, $3F
-	.db	$3D, $3B, $39, $37, $35, $33, $31, $2F
-	.db	$2D, $2B, $29, $27, $25, $23, $21, $1F
-	.db	$1D, $1B, $19, $17, $15, $13, $11, $0F
-	.db	$0D, $0B, $09, $07, $05, $03, $01, $00
-	.db	$01, $03, $05, $07, $09, $0B, $0D, $0F
-	.db	$11, $13, $15, $17, $19, $1B, $1D, $1F
-	.db	$21, $23, $25, $27, $29, $2B, $2D, $2F
-	.db	$31, $33, $35, $37, $39, $3B, $3D, $3F
-	.db	$41, $43, $45, $47, $49, $4B, $4D, $4F
-	.db	$51, $53, $55, $57, $59, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $69, $6B, $6D, $6F
-	.db	$71, $73, $75, $77, $79, $7B, $7E, $80
-TRI_LIMIT8:
-	.db	$82, $84, $86, $88, $8A, $8C, $8E, $90
-	.db	$92, $94, $96, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A6, $A8, $AA, $AC, $AE, $B0
-	.db	$B2, $B4, $B6, $B8, $BA, $BC, $BE, $C0
-	.db	$C2, $C4, $C6, $C8, $CA, $CC, $CE, $D0
-	.db	$D2, $D4, $D6, $D8, $DA, $DC, $DE, $E0
-	.db	$E2, $E4, $E6, $E8, $EA, $EC, $EE, $F0
-	.db	$F2, $F4, $F6, $F8, $FB, $FD, $FE, $FF
-	.db	$FE, $FD, $FB, $F8, $F6, $F4, $F2, $F0
-	.db	$EE, $EC, $EA, $E8, $E6, $E4, $E2, $E0
-	.db	$DE, $DC, $DA, $D8, $D6, $D4, $D2, $D0
-	.db	$CE, $CC, $CA, $C8, $C6, $C4, $C2, $C0
-	.db	$BE, $BC, $BA, $B8, $B6, $B4, $B2, $B0
-	.db	$AE, $AC, $AA, $A8, $A6, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $96, $94, $92, $90
-	.db	$8E, $8C, $8A, $88, $86, $84, $82, $80
-	.db	$7D, $7B, $79, $77, $75, $73, $71, $6F
-	.db	$6D, $6B, $69, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $59, $57, $55, $53, $51, $4F
-	.db	$4D, $4B, $49, $47, $45, $43, $41, $3F
-	.db	$3D, $3B, $39, $37, $35, $33, $31, $2F
-	.db	$2D, $2B, $29, $27, $25, $23, $21, $1F
-	.db	$1D, $1B, $19, $17, $15, $13, $11, $0F
-	.db	$0D, $0B, $09, $07, $04, $02, $01, $00
-	.db	$01, $02, $04, $07, $09, $0B, $0D, $0F
-	.db	$11, $13, $15, $17, $19, $1B, $1D, $1F
-	.db	$21, $23, $25, $27, $29, $2B, $2D, $2F
-	.db	$31, $33, $35, $37, $39, $3B, $3D, $3F
-	.db	$41, $43, $45, $47, $49, $4B, $4D, $4F
-	.db	$51, $53, $55, $57, $59, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $69, $6B, $6D, $6F
-	.db	$71, $73, $75, $77, $79, $7B, $7D, $80
-TRI_LIMIT9:
-	.db	$82, $84, $86, $88, $8A, $8C, $8E, $90
-	.db	$92, $94, $96, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A6, $A8, $AA, $AC, $AE, $B0
-	.db	$B2, $B4, $B6, $B8, $BA, $BC, $BE, $C0
-	.db	$C2, $C4, $C6, $C8, $CA, $CC, $CE, $D0
-	.db	$D2, $D4, $D6, $D8, $DA, $DC, $DE, $E0
-	.db	$E2, $E4, $E6, $E8, $EB, $ED, $EF, $F1
-	.db	$F2, $F4, $F6, $F9, $FB, $FD, $FE, $FF
-	.db	$FE, $FD, $FB, $F9, $F6, $F4, $F2, $F1
-	.db	$EF, $ED, $EB, $E8, $E6, $E4, $E2, $E0
-	.db	$DE, $DC, $DA, $D8, $D6, $D4, $D2, $D0
-	.db	$CE, $CC, $CA, $C8, $C6, $C4, $C2, $C0
-	.db	$BE, $BC, $BA, $B8, $B6, $B4, $B2, $B0
-	.db	$AE, $AC, $AA, $A8, $A6, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $96, $94, $92, $90
-	.db	$8E, $8C, $8A, $88, $86, $84, $82, $80
-	.db	$7D, $7B, $79, $77, $75, $73, $71, $6F
-	.db	$6D, $6B, $69, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $59, $57, $55, $53, $51, $4F
-	.db	$4D, $4B, $49, $47, $45, $43, $41, $3F
-	.db	$3D, $3B, $39, $37, $35, $33, $31, $2F
-	.db	$2D, $2B, $29, $27, $25, $23, $21, $1F
-	.db	$1D, $1B, $19, $17, $14, $12, $10, $0E
-	.db	$0D, $0B, $09, $06, $04, $02, $01, $00
-	.db	$01, $02, $04, $06, $09, $0B, $0D, $0E
-	.db	$10, $12, $14, $17, $19, $1B, $1D, $1F
-	.db	$21, $23, $25, $27, $29, $2B, $2D, $2F
-	.db	$31, $33, $35, $37, $39, $3B, $3D, $3F
-	.db	$41, $43, $45, $47, $49, $4B, $4D, $4F
-	.db	$51, $53, $55, $57, $59, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $69, $6B, $6D, $6F
-	.db	$71, $73, $75, $77, $79, $7B, $7D, $80
-TRI_LIMIT10:
-	.db	$82, $84, $86, $88, $8A, $8C, $8E, $90
-	.db	$92, $94, $96, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A6, $A8, $AA, $AC, $AE, $B0
-	.db	$B2, $B4, $B6, $B8, $BA, $BC, $BE, $C0
-	.db	$C2, $C4, $C6, $C8, $CA, $CC, $CE, $D1
-	.db	$D3, $D5, $D7, $D9, $DB, $DD, $DF, $E1
-	.db	$E3, $E5, $E7, $E9, $EB, $ED, $EF, $F1
-	.db	$F3, $F5, $F7, $FA, $FC, $FD, $FF, $FF
-	.db	$FF, $FD, $FC, $FA, $F7, $F5, $F3, $F1
-	.db	$EF, $ED, $EB, $E9, $E7, $E5, $E3, $E1
-	.db	$DF, $DD, $DB, $D9, $D7, $D5, $D3, $D1
-	.db	$CE, $CC, $CA, $C8, $C6, $C4, $C2, $C0
-	.db	$BE, $BC, $BA, $B8, $B6, $B4, $B2, $B0
-	.db	$AE, $AC, $AA, $A8, $A6, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $96, $94, $92, $90
-	.db	$8E, $8C, $8A, $88, $86, $84, $82, $80
-	.db	$7D, $7B, $79, $77, $75, $73, $71, $6F
-	.db	$6D, $6B, $69, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $59, $57, $55, $53, $51, $4F
-	.db	$4D, $4B, $49, $47, $45, $43, $41, $3F
-	.db	$3D, $3B, $39, $37, $35, $33, $31, $2E
-	.db	$2C, $2A, $28, $26, $24, $22, $20, $1E
-	.db	$1C, $1A, $18, $16, $14, $12, $10, $0E
-	.db	$0C, $0A, $08, $05, $03, $02, $00, $00
-	.db	$00, $02, $03, $05, $08, $0A, $0C, $0E
-	.db	$10, $12, $14, $16, $18, $1A, $1C, $1E
-	.db	$20, $22, $24, $26, $28, $2A, $2C, $2E
-	.db	$31, $33, $35, $37, $39, $3B, $3D, $3F
-	.db	$41, $43, $45, $47, $49, $4B, $4D, $4F
-	.db	$51, $53, $55, $57, $59, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $69, $6B, $6D, $6F
-	.db	$71, $73, $75, $77, $79, $7B, $7D, $80
-TRI_LIMIT11:
-	.db	$81, $83, $85, $88, $8A, $8C, $8E, $90
-	.db	$92, $94, $96, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A6, $A8, $AA, $AC, $AE, $B0
-	.db	$B2, $B4, $B6, $B8, $BA, $BC, $BF, $C1
-	.db	$C3, $C5, $C7, $C9, $CB, $CD, $CF, $D1
-	.db	$D3, $D5, $D7, $D9, $DB, $DD, $DF, $E1
-	.db	$E3, $E5, $E7, $E9, $EB, $ED, $EF, $F1
-	.db	$F4, $F6, $F8, $FA, $FC, $FE, $FF, $FF
-	.db	$FF, $FE, $FC, $FA, $F8, $F6, $F4, $F1
-	.db	$EF, $ED, $EB, $E9, $E7, $E5, $E3, $E1
-	.db	$DF, $DD, $DB, $D9, $D7, $D5, $D3, $D1
-	.db	$CF, $CD, $CB, $C9, $C7, $C5, $C3, $C1
-	.db	$BF, $BC, $BA, $B8, $B6, $B4, $B2, $B0
-	.db	$AE, $AC, $AA, $A8, $A6, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $96, $94, $92, $90
-	.db	$8E, $8C, $8A, $88, $85, $83, $81, $80
-	.db	$7E, $7C, $7A, $77, $75, $73, $71, $6F
-	.db	$6D, $6B, $69, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $59, $57, $55, $53, $51, $4F
-	.db	$4D, $4B, $49, $47, $45, $43, $40, $3E
-	.db	$3C, $3A, $38, $36, $34, $32, $30, $2E
-	.db	$2C, $2A, $28, $26, $24, $22, $20, $1E
-	.db	$1C, $1A, $18, $16, $14, $12, $10, $0E
-	.db	$0B, $09, $07, $05, $03, $01, $00, $00
-	.db	$00, $01, $03, $05, $07, $09, $0B, $0E
-	.db	$10, $12, $14, $16, $18, $1A, $1C, $1E
-	.db	$20, $22, $24, $26, $28, $2A, $2C, $2E
-	.db	$30, $32, $34, $36, $38, $3A, $3C, $3E
-	.db	$40, $43, $45, $47, $49, $4B, $4D, $4F
-	.db	$51, $53, $55, $57, $59, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $69, $6B, $6D, $6F
-	.db	$71, $73, $75, $77, $7A, $7C, $7E, $80
-TRI_LIMIT12:
-	.db	$81, $83, $85, $87, $8A, $8C, $8E, $90
-	.db	$92, $94, $96, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A6, $A8, $AA, $AC, $AE, $B1
-	.db	$B3, $B5, $B7, $B9, $BB, $BD, $BF, $C1
-	.db	$C3, $C5, $C7, $C9, $CB, $CD, $CF, $D1
-	.db	$D4, $D6, $D8, $DA, $DC, $DE, $E0, $E2
-	.db	$E3, $E5, $E7, $E9, $EB, $EE, $F0, $F2
-	.db	$F5, $F7, $F9, $FB, $FD, $FE, $FF, $FF
-	.db	$FF, $FE, $FD, $FB, $F9, $F7, $F5, $F2
-	.db	$F0, $EE, $EB, $E9, $E7, $E5, $E3, $E2
-	.db	$E0, $DE, $DC, $DA, $D8, $D6, $D4, $D1
-	.db	$CF, $CD, $CB, $C9, $C7, $C5, $C3, $C1
-	.db	$BF, $BD, $BB, $B9, $B7, $B5, $B3, $B1
-	.db	$AE, $AC, $AA, $A8, $A6, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $96, $94, $92, $90
-	.db	$8E, $8C, $8A, $87, $85, $83, $81, $80
-	.db	$7E, $7C, $7A, $78, $75, $73, $71, $6F
-	.db	$6D, $6B, $69, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $59, $57, $55, $53, $51, $4E
-	.db	$4C, $4A, $48, $46, $44, $42, $40, $3E
-	.db	$3C, $3A, $38, $36, $34, $32, $30, $2E
-	.db	$2B, $29, $27, $25, $23, $21, $1F, $1D
-	.db	$1C, $1A, $18, $16, $14, $11, $0F, $0D
-	.db	$0A, $08, $06, $04, $02, $01, $00, $00
-	.db	$00, $01, $02, $04, $06, $08, $0A, $0D
-	.db	$0F, $11, $14, $16, $18, $1A, $1C, $1D
-	.db	$1F, $21, $23, $25, $27, $29, $2B, $2E
-	.db	$30, $32, $34, $36, $38, $3A, $3C, $3E
-	.db	$40, $42, $44, $46, $48, $4A, $4C, $4E
-	.db	$51, $53, $55, $57, $59, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $69, $6B, $6D, $6F
-	.db	$71, $73, $75, $78, $7A, $7C, $7E, $80
-TRI_LIMIT13:
-	.db	$82, $84, $86, $88, $8A, $8C, $8E, $90
-	.db	$92, $94, $96, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A7, $A9, $AB, $AD, $AF, $B1
-	.db	$B3, $B5, $B7, $B9, $BB, $BD, $BF, $C1
-	.db	$C3, $C5, $C7, $C9, $CC, $CE, $D0, $D2
-	.db	$D4, $D6, $D8, $DA, $DC, $DE, $E0, $E1
-	.db	$E3, $E5, $E8, $EA, $EC, $EE, $F1, $F3
-	.db	$F6, $F8, $FA, $FC, $FD, $FE, $FF, $FF
-	.db	$FF, $FE, $FD, $FC, $FA, $F8, $F6, $F3
-	.db	$F1, $EE, $EC, $EA, $E8, $E5, $E3, $E1
-	.db	$E0, $DE, $DC, $DA, $D8, $D6, $D4, $D2
-	.db	$D0, $CE, $CC, $C9, $C7, $C5, $C3, $C1
-	.db	$BF, $BD, $BB, $B9, $B7, $B5, $B3, $B1
-	.db	$AF, $AD, $AB, $A9, $A7, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $96, $94, $92, $90
-	.db	$8E, $8C, $8A, $88, $86, $84, $82, $80
-	.db	$7D, $7B, $79, $77, $75, $73, $71, $6F
-	.db	$6D, $6B, $69, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $58, $56, $54, $52, $50, $4E
-	.db	$4C, $4A, $48, $46, $44, $42, $40, $3E
-	.db	$3C, $3A, $38, $36, $33, $31, $2F, $2D
-	.db	$2B, $29, $27, $25, $23, $21, $1F, $1E
-	.db	$1C, $1A, $17, $15, $13, $11, $0E, $0C
-	.db	$09, $07, $05, $03, $02, $01, $00, $00
-	.db	$00, $01, $02, $03, $05, $07, $09, $0C
-	.db	$0E, $11, $13, $15, $17, $1A, $1C, $1E
-	.db	$1F, $21, $23, $25, $27, $29, $2B, $2D
-	.db	$2F, $31, $33, $36, $38, $3A, $3C, $3E
-	.db	$40, $42, $44, $46, $48, $4A, $4C, $4E
-	.db	$50, $52, $54, $56, $58, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $69, $6B, $6D, $6F
-	.db	$71, $73, $75, $77, $79, $7B, $7D, $80
-TRI_LIMIT14:
-	.db	$82, $84, $86, $88, $8A, $8C, $8F, $91
-	.db	$93, $95, $97, $98, $9A, $9C, $9E, $A0
-	.db	$A2, $A4, $A6, $A8, $AB, $AD, $AF, $B1
-	.db	$B3, $B6, $B8, $BA, $BC, $BE, $C1, $C3
-	.db	$C5, $C7, $C9, $CB, $CC, $CE, $D0, $D2
-	.db	$D4, $D6, $D8, $DA, $DC, $DE, $E0, $E3
-	.db	$E5, $E7, $EA, $EC, $EF, $F1, $F3, $F6
-	.db	$F8, $FA, $FB, $FC, $FE, $FE, $FF, $FF
-	.db	$FF, $FE, $FE, $FC, $FB, $FA, $F8, $F6
-	.db	$F3, $F1, $EF, $EC, $EA, $E7, $E5, $E3
-	.db	$E0, $DE, $DC, $DA, $D8, $D6, $D4, $D2
-	.db	$D0, $CE, $CC, $CB, $C9, $C7, $C5, $C3
-	.db	$C1, $BE, $BC, $BA, $B8, $B6, $B3, $B1
-	.db	$AF, $AD, $AB, $A8, $A6, $A4, $A2, $A0
-	.db	$9E, $9C, $9A, $98, $97, $95, $93, $91
-	.db	$8F, $8C, $8A, $88, $86, $84, $82, $80
-	.db	$7D, $7B, $79, $77, $75, $73, $70, $6E
-	.db	$6C, $6A, $68, $67, $65, $63, $61, $5F
-	.db	$5D, $5B, $59, $57, $54, $52, $50, $4E
-	.db	$4C, $49, $47, $45, $43, $41, $3E, $3C
-	.db	$3A, $38, $36, $34, $33, $31, $2F, $2D
-	.db	$2B, $29, $27, $25, $23, $21, $1F, $1C
-	.db	$1A, $18, $15, $13, $10, $0E, $0C, $09
-	.db	$07, $05, $04, $03, $01, $01, $00, $00
-	.db	$00, $01, $01, $03, $04, $05, $07, $09
-	.db	$0C, $0E, $10, $13, $15, $18, $1A, $1C
-	.db	$1F, $21, $23, $25, $27, $29, $2B, $2D
-	.db	$2F, $31, $33, $34, $36, $38, $3A, $3C
-	.db	$3E, $41, $43, $45, $47, $49, $4C, $4E
-	.db	$50, $52, $54, $57, $59, $5B, $5D, $5F
-	.db	$61, $63, $65, $67, $68, $6A, $6C, $6E
-	.db	$70, $73, $75, $77, $79, $7B, $7D, $7F
-TRI_LIMIT15:
-	.db	$81, $83, $85, $87, $89, $8B, $8D, $8F
-	.db	$92, $94, $96, $98, $9A, $9D, $9F, $A1
-	.db	$A3, $A6, $A8, $AA, $AC, $AF, $B1, $B3
-	.db	$B5, $B7, $B9, $BB, $BD, $BF, $C1, $C2
-	.db	$C4, $C6, $C8, $CA, $CC, $CE, $D0, $D2
-	.db	$D4, $D7, $D9, $DB, $DE, $E0, $E2, $E5
-	.db	$E7, $EA, $EC, $EF, $F1, $F3, $F5, $F7
-	.db	$F9, $FA, $FC, $FD, $FE, $FE, $FF, $FF
-	.db	$FF, $FE, $FE, $FD, $FC, $FA, $F9, $F7
-	.db	$F5, $F3, $F1, $EF, $EC, $EA, $E7, $E5
-	.db	$E2, $E0, $DE, $DB, $D9, $D7, $D4, $D2
-	.db	$D0, $CE, $CC, $CA, $C8, $C6, $C4, $C2
-	.db	$C1, $BF, $BD, $BB, $B9, $B7, $B5, $B3
-	.db	$B1, $AF, $AC, $AA, $A8, $A6, $A3, $A1
-	.db	$9F, $9D, $9A, $98, $96, $94, $92, $8F
-	.db	$8D, $8B, $89, $87, $85, $83, $81, $80
-	.db	$7E, $7C, $7A, $78, $76, $74, $72, $70
-	.db	$6D, $6B, $69, $67, $65, $62, $60, $5E
-	.db	$5C, $59, $57, $55, $53, $50, $4E, $4C
-	.db	$4A, $48, $46, $44, $42, $40, $3E, $3D
-	.db	$3B, $39, $37, $35, $33, $31, $2F, $2D
-	.db	$2B, $28, $26, $24, $21, $1F, $1D, $1A
-	.db	$18, $15, $13, $10, $0E, $0C, $0A, $08
-	.db	$06, $05, $03, $02, $01, $01, $00, $00
-	.db	$00, $01, $01, $02, $03, $05, $06, $08
-	.db	$0A, $0C, $0E, $10, $13, $15, $18, $1A
-	.db	$1D, $1F, $21, $24, $26, $28, $2B, $2D
-	.db	$2F, $31, $33, $35, $37, $39, $3B, $3D
-	.db	$3E, $40, $42, $44, $46, $48, $4A, $4C
-	.db	$4E, $50, $53, $55, $57, $59, $5C, $5E
-	.db	$60, $62, $65, $67, $69, $6B, $6D, $70
-	.db	$72, $74, $76, $78, $7A, $7C, $7E, $7F
-
-.else	; USE_ORIGINAL_BANDLIMITED_PWM
-;-----------------------------------------------------------------------------
-;
-;-----------------------------------------------------------------------------
-
-.if USE_ORIGINAL_BANDLIMITED_PWM
-;*** Bandlimited reverse sawtooth wavetables (each table is 256 bytes long, unsigned integer)
-SAW_LIMIT0:
-	; base freqency: 25.96 Hz, discrets: 701, rms: 7.95, min: -0.87, max: 0.87
-
-	.db	  128,  238,  239,  235,   234,  234,  234,  232
-	.db	  231,  231,  230,  229,   228,  227,  226,  225
-	.db	  224,  224,  223,  222,   221,  220,  219,  218
-	.db	  217,  217,  216,  215,   214,  213,  212,  211
-
-	.db	  211,  210,  209,  208,   207,  206,  205,  204
-	.db	  204,  203,  202,  201,   200,  199,  198,  198
-	.db	  197,  196,  195,  194,   193,  192,  191,  191
-	.db	  190,  189,  188,  187,   186,  185,  185,  184
-
-	.db	  183,  182,  181,  180,   179,  179,  178,  177
-	.db	  176,  175,  174,  173,   173,  172,  171,  170
-	.db	  169,  168,  167,  167,   166,  165,  164,  163
-	.db	  162,  161,  160,  160,   159,  158,  157,  156
-
-	.db	  155,  154,  154,  153,   152,  151,  150,  149
-	.db	  148,  147,  147,  146,   145,  144,  143,  142
-	.db	  141,  141,  140,  139,   138,  137,  136,  135
-	.db	  134,  134,  133,  132,   131,  130,  129,  128
-
-	.db	  128,  128,  127,  126,   125,  124,  123,  122
-	.db	  122,  121,  120,  119,   118,  117,  116,  115
-	.db	  115,  114,  113,  112,   111,  110,  109,  109
-	.db	  108,  107,  106,  105,   104,  103,  102,  102
-
-	.db	  101,  100,   99,   98,    97,   96,   96,   95
-	.db	   94,   93,   92,   91,    90,   89,   89,   88
-	.db	   87,   86,   85,   84,    83,   83,   82,   81
-	.db	   80,   79,   78,   77,    77,   76,   75,   74
-
-	.db	   73,   72,   71,   71,    70,   69,   68,   67
-	.db	   66,   65,   65,   64,    63,   62,   61,   60
-	.db	   59,   58,   58,   57,    56,   55,   54,   53
-	.db	   52,   52,   51,   50,    49,   48,   47,   46
-
-	.db	   45,   45,   44,   43,    42,   41,   40,   39
-	.db	   39,   38,   37,   36,    35,   34,   33,   32
-	.db	   32,   31,   30,   29,    28,   27,   26,   25
-	.db	   25,   24,   22,   22,    22,   21,   17,   18
-
-
-SAW_LIMIT1:
-	; base freqency: 41.20 Hz, discrets: 442, rms: 7.95, min: -0.88, max: 0.88
-
-	.db	  128,  239,  240,  235,   233,  235,  234,  231
-	.db	  231,  231,  230,  228,   228,  227,  226,  225
-	.db	  225,  224,  222,  222,   221,  220,  219,  218
-	.db	  218,  217,  216,  215,   214,  213,  212,  212
-
-	.db	  211,  210,  209,  208,   207,  206,  205,  205
-	.db	  204,  203,  202,  201,   200,  199,  199,  198
-	.db	  197,  196,  195,  194,   193,  192,  192,  191
-	.db	  190,  189,  188,  187,   186,  186,  185,  184
-
-	.db	  183,  182,  181,  180,   180,  179,  178,  177
-	.db	  176,  175,  174,  173,   173,  172,  171,  170
-	.db	  169,  168,  167,  167,   166,  165,  164,  163
-	.db	  162,  161,  160,  160,   159,  158,  157,  156
-
-	.db	  155,  154,  154,  153,   152,  151,  150,  149
-	.db	  148,  147,  147,  146,   145,  144,  143,  142
-	.db	  141,  141,  140,  139,   138,  137,  136,  135
-	.db	  134,  134,  133,  132,   131,  130,  129,  128
-
-	.db	  128,  128,  127,  126,   125,  124,  123,  122
-	.db	  122,  121,  120,  119,   118,  117,  116,  115
-	.db	  115,  114,  113,  112,   111,  110,  109,  109
-	.db	  108,  107,  106,  105,   104,  103,  102,  102
-
-	.db	  101,  100,   99,   98,    97,   96,   96,   95
-	.db	   94,   93,   92,   91,    90,   89,   89,   88
-	.db	   87,   86,   85,   84,    83,   83,   82,   81
-	.db	   80,   79,   78,   77,    76,   76,   75,   74
-
-	.db	   73,   72,   71,   70,    70,   69,   68,   67
-	.db	   66,   65,   64,   64,    63,   62,   61,   60
-	.db	   59,   58,   57,   57,    56,   55,   54,   53
-	.db	   52,   51,   51,   50,    49,   48,   47,   46
-
-	.db	   45,   44,   44,   43,    42,   41,   40,   39
-	.db	   38,   38,   37,   36,    35,   34,   34,   32
-	.db	   31,   31,   30,   29,    28,   28,   26,   25
-	.db	   25,   25,   22,   21,    23,   21,   16,   17
-
-
-SAW_LIMIT2:
-	; base freqency: 65.41 Hz, discrets: 278, rms: 7.95, min: -0.85, max: 0.85
-
-	.db	  128,  228,  234,  236,   236,  236,  235,  234
-	.db	  232,  230,  229,  228,   227,  227,  226,  226
-	.db	  225,  224,  223,  222,   221,  220,  219,  218
-	.db	  217,  217,  216,  215,   215,  214,  213,  212
-
-	.db	  211,  210,  209,  208,   207,  206,  206,  205
-	.db	  204,  203,  202,  201,   200,  199,  198,  198
-	.db	  197,  196,  195,  194,   194,  193,  192,  191
-	.db	  190,  189,  188,  187,   186,  186,  185,  184
-
-	.db	  183,  182,  181,  180,   179,  179,  178,  177
-	.db	  176,  175,  174,  174,   173,  172,  171,  170
-	.db	  169,  168,  167,  167,   166,  165,  164,  163
-	.db	  162,  161,  160,  159,   159,  158,  157,  156
-
-	.db	  155,  155,  154,  153,   152,  151,  150,  149
-	.db	  148,  147,  147,  146,   145,  144,  143,  142
-	.db	  141,  140,  140,  139,   138,  137,  136,  135
-	.db	  135,  134,  133,  132,   131,  130,  129,  128
-
-	.db	  128,  128,  127,  126,   125,  124,  123,  122
-	.db	  121,  121,  120,  119,   118,  117,  116,  116
-	.db	  115,  114,  113,  112,   111,  110,  109,  109
-	.db	  108,  107,  106,  105,   104,  103,  102,  101
-
-	.db	  101,  100,   99,   98,    97,   97,   96,   95
-	.db	   94,   93,   92,   91,    90,   89,   89,   88
-	.db	   87,   86,   85,   84,    83,   82,   82,   81
-	.db	   80,   79,   78,   77,    77,   76,   75,   74
-
-	.db	   73,   72,   71,   70,    70,   69,   68,   67
-	.db	   66,   65,   64,   63,    62,   62,   61,   60
-	.db	   59,   58,   58,   57,    56,   55,   54,   53
-	.db	   52,   51,   50,   50,    49,   48,   47,   46
-
-	.db	   45,   44,   43,   42,    41,   41,   40,   39
-	.db	   39,   38,   37,   36,    35,   34,   33,   32
-	.db	   31,   30,   30,   29,    29,   28,   27,   26
-	.db	   24,   22,   21,   20,    20,   20,   22,   28
-
-
-SAW_LIMIT3:
-	; base freqency: 103.83 Hz, discrets: 176, rms: 7.95, min: -0.92, max: 0.92
-
-	.db	  128,  246,  241,  230,   235,  237,  231,  231
-	.db	  233,  230,  228,  230,   228,  226,  227,  226
-	.db	  223,  224,  223,  221,   221,  221,  219,  218
-	.db	  218,  216,  215,  215,   214,  212,  212,  212
-
-	.db	  210,  210,  209,  208,   207,  207,  205,  204
-	.db	  204,  203,  201,  201,   200,  199,  198,  198
-	.db	  196,  196,  195,  194,   193,  193,  191,  190
-	.db	  190,  189,  188,  187,   186,  185,  185,  184
-
-	.db	  183,  182,  181,  180,   179,  179,  178,  176
-	.db	  176,  175,  174,  173,   173,  171,  171,  170
-	.db	  169,  168,  167,  166,   165,  165,  164,  163
-	.db	  162,  161,  160,  159,   159,  158,  157,  156
-
-	.db	  155,  154,  154,  153,   151,  151,  150,  149
-	.db	  148,  148,  146,  146,   145,  144,  143,  142
-	.db	  141,  140,  140,  139,   138,  137,  136,  135
-	.db	  134,  134,  133,  132,   131,  130,  129,  129
-
-	.db	  128,  127,  127,  126,   125,  124,  123,  122
-	.db	  122,  121,  120,  119,   118,  117,  116,  116
-	.db	  115,  114,  113,  112,   111,  110,  110,  108
-	.db	  108,  107,  106,  105,   105,  103,  102,  102
-
-	.db	  101,  100,   99,   98,    97,   97,   96,   95
-	.db	   94,   93,   92,   91,    91,   90,   89,   88
-	.db	   87,   86,   85,   85,    83,   83,   82,   81
-	.db	   80,   80,   78,   77,    77,   76,   75,   74
-
-	.db	   73,   72,   71,   71,    70,   69,   68,   67
-	.db	   66,   66,   65,   63,    63,   62,   61,   60
-	.db	   60,   58,   58,   57,    56,   55,   55,   53
-	.db	   52,   52,   51,   49,    49,   48,   47,   46
-
-	.db	   46,   44,   44,   44,    42,   41,   41,   40
-	.db	   38,   38,   37,   35,    35,   35,   33,   32
-	.db	   33,   30,   29,   30,    28,   26,   28,   26
-	.db	   23,   25,   25,   19,    21,   26,   15,   10
-
-
-SAW_LIMIT4:
-	; base freqency: 164.81 Hz, discrets: 111, rms: 7.95, min: -1.00, max: 1.00
-
-	.db	  128,  255,  229,  237,   235,  231,  236,  228
-	.db	  234,  228,  231,  228,   227,  228,  224,  227
-	.db	  223,  225,  222,  222,   221,  219,  220,  217
-	.db	  218,  216,  216,  215,   213,  214,  211,  212
-
-	.db	  210,  210,  208,  208,   207,  206,  206,  204
-	.db	  204,  202,  202,  201,   200,  200,  198,  198
-	.db	  196,  196,  195,  194,   193,  192,  192,  190
-	.db	  190,  189,  188,  187,   186,  186,  184,  184
-
-	.db	  182,  182,  181,  180,   180,  178,  178,  176
-	.db	  176,  175,  174,  173,   172,  172,  170,  170
-	.db	  169,  168,  167,  166,   166,  164,  164,  163
-	.db	  162,  161,  160,  160,   158,  158,  157,  156
-
-	.db	  155,  154,  154,  152,   152,  150,  150,  149
-	.db	  148,  147,  146,  146,   144,  144,  143,  142
-	.db	  141,  140,  140,  138,   138,  137,  136,  135
-	.db	  134,  134,  132,  132,   131,  130,  129,  128
-
-	.db	  128,  128,  127,  126,   125,  124,  124,  122
-	.db	  122,  121,  120,  119,   118,  118,  116,  116
-	.db	  115,  114,  113,  112,   112,  110,  110,  109
-	.db	  108,  107,  106,  106,   104,  104,  102,  102
-
-	.db	  101,  100,   99,   98,    98,   96,   96,   95
-	.db	   94,   93,   92,   92,    90,   90,   89,   88
-	.db	   87,   86,   86,   84,    84,   83,   82,   81
-	.db	   80,   80,   78,   78,    76,   76,   75,   74
-
-	.db	   74,   72,   72,   70,    70,   69,   68,   67
-	.db	   66,   66,   64,   64,    63,   62,   61,   60
-	.db	   60,   58,   58,   56,    56,   55,   54,   54
-	.db	   52,   52,   50,   50,    49,   48,   48,   46
-
-	.db	   46,   44,   45,   42,    43,   41,   40,   40
-	.db	   38,   39,   36,   37,    35,   34,   34,   31
-	.db	   33,   29,   32,   28,    29,   28,   25,   28
-	.db	   22,   28,   20,   25,    21,   19,   27,    1
-
-
-SAW_LIMIT5:
-	; base freqency: 261.62 Hz, discrets: 70, rms: 7.95, min: -1.00, max: 1.00
-
-	.db	  128,  230,  255,  232,   226,  239,  237,  227
-	.db	  229,  235,  230,  225,   229,  230,  224,  223
-	.db	  226,  225,  220,  221,   223,  220,  217,  219
-	.db	  219,  215,  215,  216,   214,  212,  212,  213
-
-	.db	  210,  209,  210,  209,   206,  206,  206,  205
-	.db	  203,  203,  203,  200,   199,  200,  199,  197
-	.db	  196,  197,  195,  193,   194,  193,  191,  190
-	.db	  190,  189,  187,  187,   187,  185,  184,  184
-
-	.db	  183,  181,  181,  181,   179,  178,  178,  177
-	.db	  176,  175,  175,  174,   172,  171,  171,  170
-	.db	  168,  168,  168,  166,   165,  165,  164,  162
-	.db	  162,  162,  160,  159,   159,  158,  156,  156
-
-	.db	  156,  154,  153,  153,   152,  151,  150,  149
-	.db	  149,  147,  146,  146,   145,  143,  143,  143
-	.db	  141,  140,  140,  139,   137,  137,  137,  135
-	.db	  134,  134,  133,  131,   131,  131,  129,  128
-
-	.db	  128,  128,  127,  125,   125,  125,  123,  122
-	.db	  122,  121,  119,  119,   119,  117,  116,  116
-	.db	  115,  113,  113,  113,   111,  110,  110,  109
-	.db	  107,  107,  106,  105,   104,  103,  103,  102
-
-	.db	  100,  100,  100,   98,    97,   97,   96,   94
-	.db	   94,   94,   92,   91,    91,   90,   88,   88
-	.db	   88,   86,   85,   85,    84,   82,   81,   81
-	.db	   80,   79,   78,   78,    77,   75,   75,   75
-
-	.db	   73,   72,   72,   71,    69,   69,   69,   67
-	.db	   66,   66,   65,   63,    62,   63,   61,   59
-	.db	   60,   59,   57,   56,    57,   56,   53,   53
-	.db	   53,   51,   50,   50,    50,   47,   46,   47
-
-	.db	   46,   43,   44,   44,    42,   40,   41,   41
-	.db	   37,   37,   39,   36,    33,   35,   36,   31
-	.db	   30,   33,   32,   26,    27,   31,   26,   21
-	.db	   27,   29,   19,   17,    30,   24,    1,   26
-
-
-SAW_LIMIT6:
-	; base freqency: 415.30 Hz, discrets: 44, rms: 7.95, min: -1.00, max: 1.00
-
-	.db	  128,  199,  245,  255,   243,  227,  223,  229
-	.db	  237,  237,  231,  224,   223,  227,  230,  229
-	.db	  224,  220,  220,  223,   224,  222,  218,  216
-	.db	  216,  218,  218,  216,   213,  211,  212,  213
-
-	.db	  213,  210,  207,  206,   207,  208,  207,  204
-	.db	  202,  202,  203,  203,   201,  199,  197,  197
-	.db	  198,  197,  196,  193,   192,  192,  193,  192
-	.db	  190,  188,  187,  187,   187,  187,  185,  183
-
-	.db	  182,  182,  182,  181,   179,  178,  177,  177
-	.db	  177,  176,  174,  172,   172,  172,  172,  170
-	.db	  168,  167,  167,  167,   166,  165,  163,  162
-	.db	  162,  162,  161,  159,   158,  157,  157,  157
-
-	.db	  156,  154,  153,  152,   152,  152,  150,  148
-	.db	  148,  147,  147,  146,   145,  143,  143,  142
-	.db	  142,  141,  139,  138,   137,  137,  137,  136
-	.db	  134,  133,  132,  132,   132,  130,  129,  128
-
-	.db	  128,  128,  127,  126,   124,  124,  124,  123
-	.db	  122,  120,  119,  119,   119,  118,  117,  115
-	.db	  114,  114,  113,  113,   111,  110,  109,  109
-	.db	  108,  108,  106,  104,   104,  104,  103,  102
-
-	.db	  100,   99,   99,   99,    98,   97,   95,   94
-	.db	   94,   94,   93,   91,    90,   89,   89,   89
-	.db	   88,   86,   84,   84,    84,   84,   82,   80
-	.db	   79,   79,   79,   78,    77,   75,   74,   74
-
-	.db	   74,   73,   71,   69,    69,   69,   69,   68
-	.db	   66,   64,   63,   64,    64,   63,   60,   59
-	.db	   58,   59,   59,   57,    55,   53,   53,   54
-	.db	   54,   52,   49,   48,    49,   50,   49,   46
-
-	.db	   43,   43,   44,   45,    43,   40,   38,   38
-	.db	   40,   40,   38,   34,    32,   33,   36,   36
-	.db	   32,   27,   26,   29,    33,   32,   25,   19
-	.db	   19,   27,   33,   29,    13,    1,   11,   57
-
-
-SAW_LIMIT7:
-	; base freqency: 659.25 Hz, discrets: 28, rms: 7.95, min: -0.99, max: 0.99
-
-	.db	  128,  175,  215,  242,   254,  253,  244,  233
-	.db	  224,  220,  222,  227,   232,  235,  234,  230
-	.db	  224,  220,  218,  218,   220,  223,  224,  223
-	.db	  220,  216,  213,  212,   212,  213,  214,  215
-
-	.db	  214,  212,  209,  206,   205,  205,  205,  206
-	.db	  207,  206,  204,  201,   199,  197,  197,  198
-	.db	  198,  198,  197,  195,   193,  191,  190,  190
-	.db	  190,  190,  190,  189,   187,  185,  183,  182
-
-	.db	  182,  182,  182,  182,   181,  180,  178,  176
-	.db	  175,  174,  174,  175,   174,  173,  172,  170
-	.db	  168,  167,  166,  167,   167,  166,  165,  164
-	.db	  162,  160,  159,  159,   159,  159,  158,  157
-
-	.db	  156,  154,  152,  151,   151,  151,  151,  151
-	.db	  150,  148,  146,  145,   144,  143,  143,  143
-	.db	  143,  142,  140,  138,   137,  136,  135,  135
-	.db	  135,  135,  134,  132,   131,  129,  128,  128
-
-	.db	  128,  128,  128,  127,   125,  124,  122,  121
-	.db	  121,  121,  121,  120,   119,  118,  116,  114
-	.db	  113,  113,  113,  113,   112,  111,  110,  108
-	.db	  106,  105,  105,  105,   105,  105,  104,  102
-
-	.db	  100,   99,   98,   97,    97,   97,   97,   96
-	.db	   94,   92,   91,   90,    89,   89,   90,   89
-	.db	   88,   86,   84,   83,    82,   81,   82,   82
-	.db	   81,   80,   78,   76,    75,   74,   74,   74
-
-	.db	   74,   74,   73,   71,    69,   67,   66,   66
-	.db	   66,   66,   66,   65,    63,   61,   59,   58
-	.db	   58,   58,   59,   59,    57,   55,   52,   50
-	.db	   49,   50,   51,   51,    51,   50,   47,   44
-
-	.db	   42,   41,   42,   43,    44,   44,   43,   40
-	.db	   36,   33,   32,   33,    36,   38,   38,   36
-	.db	   32,   26,   22,   21,    24,   29,   34,   36
-	.db	   32,   23,   12,    3,     2,   14,   41,   81
-
-
-SAW_LIMIT8:
-	; base freqency: 1046.50 Hz, discrets: 18, rms: 7.95, min: -0.98, max: 0.98
-
-	.db	  128,  159,  188,  213,   232,  245,  252,  253
-	.db	  250,  244,  236,  228,   222,  218,  216,  217
-	.db	  219,  222,  226,  228,   229,  229,  227,  223
-	.db	  220,  216,  213,  210,   209,  209,  210,  212
-
-	.db	  213,  214,  214,  213,   212,  209,  207,  204
-	.db	  202,  200,  199,  199,   199,  200,  201,  201
-	.db	  201,  200,  198,  196,   194,  192,  190,  188
-	.db	  188,  187,  188,  188,   188,  188,  188,  187
-
-	.db	  185,  184,  182,  180,   178,  177,  176,  176
-	.db	  176,  176,  176,  176,   175,  174,  173,  171
-	.db	  169,  167,  166,  165,   164,  164,  164,  164
-	.db	  164,  164,  163,  162,   160,  159,  157,  155
-
-	.db	  154,  153,  152,  152,   152,  152,  152,  151
-	.db	  151,  149,  148,  146,   144,  143,  141,  140
-	.db	  140,  140,  140,  140,   139,  139,  138,  137
-	.db	  135,  134,  132,  130,   129,  128,  128,  128
-
-	.db	  128,  128,  128,  128,   127,  126,  124,  122
-	.db	  121,  119,  118,  117,   117,  116,  116,  116
-	.db	  116,  116,  115,  113,   112,  110,  108,  107
-	.db	  105,  105,  104,  104,   104,  104,  104,  103
-
-	.db	  102,  101,   99,   97,    96,   94,   93,   92
-	.db	   92,   92,   92,   92,    92,   91,   90,   89
-	.db	   87,   85,   83,   82,    81,   80,   80,   80
-	.db	   80,   80,   80,   79,    78,   76,   74,   72
-
-	.db	   71,   69,   68,   68,    68,   68,   68,   69
-	.db	   68,   68,   66,   64,    62,   60,   58,   56
-	.db	   55,   55,   55,   56,    57,   57,   57,   56
-	.db	   54,   52,   49,   47,    44,   43,   42,   42
-
-	.db	   43,   44,   46,   47,    47,   46,   43,   40
-	.db	   36,   33,   29,   27,    27,   28,   30,   34
-	.db	   37,   39,   40,   38,    34,   28,   20,   12
-	.db	    6,    3,    4,   11,    24,   43,   68,   97
-
-
-SAW_LIMIT9:
-	; base freqency: 1661.21 Hz, discrets: 11, rms: 7.95, min: -0.97, max: 0.97
-
-	.db	  128,  147,  166,  183,   200,  214,  226,  236
-	.db	  244,  248,  251,  251,   250,  247,  243,  238
-	.db	  232,  227,  222,  218,   214,  212,  210,  209
-	.db	  210,  211,  212,  214,   215,  217,  218,  219
-
-	.db	  220,  219,  218,  217,   215,  212,  209,  207
-	.db	  204,  201,  199,  197,   196,  195,  195,  195
-	.db	  195,  195,  196,  197,   197,  197,  197,  197
-	.db	  196,  195,  193,  191,   189,  187,  185,  183
-
-	.db	  181,  179,  178,  177,   177,  176,  176,  176
-	.db	  176,  177,  177,  177,   177,  176,  176,  174
-	.db	  173,  172,  170,  168,   166,  164,  162,  161
-	.db	  160,  158,  158,  157,   157,  157,  157,  157
-
-	.db	  157,  157,  157,  156,   156,  155,  153,  152
-	.db	  150,  149,  147,  145,   143,  142,  140,  139
-	.db	  139,  138,  138,  137,   137,  137,  137,  137
-	.db	  137,  137,  136,  135,   134,  133,  131,  129
-
-	.db	  128,  127,  125,  123,   122,  121,  120,  119
-	.db	  119,  119,  119,  119,   119,  119,  118,  118
-	.db	  117,  117,  116,  114,   113,  111,  109,  107
-	.db	  106,  104,  103,  101,   100,  100,   99,   99
-
-	.db	   99,   99,   99,   99,    99,   99,   98,   98
-	.db	   96,   95,   94,   92,    90,   88,   86,   84
-	.db	   83,   82,   80,   80,    79,   79,   79,   79
-	.db	   80,   80,   80,   80,    79,   79,   78,   77
-
-	.db	   75,   73,   71,   69,    67,   65,   63,   61
-	.db	   60,   59,   59,   59,    59,   59,   60,   61
-	.db	   61,   61,   61,   61,    60,   59,   57,   55
-	.db	   52,   49,   47,   44,    41,   39,   38,   37
-
-	.db	   36,   37,   38,   39,    41,   42,   44,   45
-	.db	   46,   47,   46,   44,    42,   38,   34,   29
-	.db	   24,   18,   13,    9,     6,    5,    5,    8
-	.db	   12,   20,   30,   42,    56,   73,   90,  109
-
-
-SAW_LIMIT10:
-	; base freqency: 2637.01 Hz, discrets: 7, rms: 7.95, min: -0.94, max: 0.94
-
-	.db	  128,  140,  152,  165,   176,  187,  198,  207
-	.db	  216,  224,  230,  236,   241,  244,  246,  248
-	.db	  248,  248,  247,  245,   242,  239,  236,  232
-	.db	  228,  224,  221,  217,   214,  210,  208,  205
-
-	.db	  203,  202,  200,  200,   199,  199,  200,  200
-	.db	  201,  202,  202,  203,   204,  205,  206,  206
-	.db	  206,  206,  205,  205,   204,  203,  201,  199
-	.db	  197,  195,  193,  191,   189,  187,  184,  182
-
-	.db	  180,  179,  177,  176,   175,  174,  173,  173
-	.db	  173,  173,  173,  173,   173,  173,  173,  174
-	.db	  174,  174,  173,  173,   172,  172,  171,  170
-	.db	  168,  167,  165,  164,   162,  160,  158,  156
-
-	.db	  154,  153,  151,  149,   148,  147,  146,  145
-	.db	  144,  144,  143,  143,   143,  143,  143,  143
-	.db	  143,  143,  143,  142,   142,  142,  141,  140
-	.db	  140,  138,  137,  136,   134,  133,  131,  129
-
-	.db	  128,  127,  125,  123,   122,  120,  119,  118
-	.db	  116,  116,  115,  114,   114,  114,  113,  113
-	.db	  113,  113,  113,  113,   113,  113,  113,  112
-	.db	  112,  111,  110,  109,   108,  107,  105,  103
-
-	.db	  102,  100,   98,   96,    94,   92,   91,   89
-	.db	   88,   86,   85,   84,    84,   83,   83,   82
-	.db	   82,   82,   83,   83,    83,   83,   83,   83
-	.db	   83,   83,   83,   82,    81,   80,   79,   77
-
-	.db	   76,   74,   72,   69,    67,   65,   63,   61
-	.db	   59,   57,   55,   53,    52,   51,   51,   50
-	.db	   50,   50,   50,   51,    52,   53,   54,   54
-	.db	   55,   56,   56,   57,    57,   56,   56,   54
-
-	.db	   53,   51,   48,   46,    42,   39,   35,   32
-	.db	   28,   24,   20,   17,    14,   11,    9,    8
-	.db	    8,    8,   10,   12,    15,   20,   26,   32
-	.db	   40,   49,   58,   69,    80,   91,  104,  116
-
-
-SAW_LIMIT11:
-	; base freqency: 4185.98 Hz, discrets: 5, rms: 7.95, min: -0.92, max: 0.92
-
-	.db	  128,  137,  146,  155,   163,  172,  180,  188
-	.db	  196,  203,  209,  215,   221,  226,  230,  234
-	.db	  237,  240,  242,  244,   245,  245,  245,  245
-	.db	  244,  242,  240,  238,   236,  233,  230,  227
-
-	.db	  224,  221,  218,  215,   212,  209,  206,  203
-	.db	  201,  198,  196,  195,   193,  192,  190,  189
-	.db	  189,  188,  188,  188,   188,  188,  188,  189
-	.db	  189,  190,  190,  191,   191,  191,  192,  192
-
-	.db	  192,  192,  192,  191,   191,  190,  189,  188
-	.db	  187,  186,  184,  183,   181,  179,  177,  175
-	.db	  173,  171,  169,  167,   165,  164,  162,  160
-	.db	  158,  157,  155,  154,   153,  152,  151,  151
-
-	.db	  150,  149,  149,  149,   149,  149,  148,  148
-	.db	  149,  149,  149,  149,   149,  148,  148,  148
-	.db	  148,  147,  147,  146,   145,  144,  143,  142
-	.db	  141,  139,  138,  136,   135,  133,  131,  129
-
-	.db	  128,  127,  125,  123,   121,  120,  118,  117
-	.db	  115,  114,  113,  112,   111,  110,  109,  109
-	.db	  108,  108,  108,  108,   107,  107,  107,  107
-	.db	  107,  108,  108,  107,   107,  107,  107,  107
-
-	.db	  106,  105,  105,  104,   103,  102,  101,   99
-	.db	   98,   96,   94,   92,    91,   89,   87,   85
-	.db	   83,   81,   79,   77,    75,   73,   72,   70
-	.db	   69,   68,   67,   66,    65,   65,   64,   64
-
-	.db	   64,   64,   64,   65,    65,   65,   66,   66
-	.db	   67,   67,   68,   68,    68,   68,   68,   68
-	.db	   67,   67,   66,   64,    63,   61,   60,   58
-	.db	   55,   53,   50,   47,    44,   41,   38,   35
-
-	.db	   32,   29,   26,   23,    20,   18,   16,   14
-	.db	   12,   11,   11,   11,    11,   12,   14,   16
-	.db	   19,   22,   26,   30,    35,   41,   47,   53
-	.db	   60,   68,   76,   84,    93,  101,  110,  119
-.endif	; USE_ORIGINAL_BANDLIMITED_PWM
-
-
-;-----------------------------------------------------------------------------
-;
-;*** Bandlimited sawtooth wavetables (each table is 256 bytes long, unsigned integer)
 INV_SAW0:
 	; base freqency: 25.96 Hz, discrets: 701, rms: 7.95, min: -0.87, max: 0.87
 
@@ -10678,8 +7461,6 @@ TRI_LIMIT11:
 	.db	  157,  155,  153,  151,   149,  147,  145,  143
 	.db	  141,  140,  138,  136,   134,  133,  131,  129
 
-.endif	; USE_ORIGINAL_BANDLIMITED_PWM
-
 ;-----------------------------------------------------------------------------
 ;
 ;-----------------------------------------------------------------------------
@@ -10728,7 +7509,7 @@ debug_byte:
 
 startup_message:
 	.db	0x0d, 0x0a, 0x0d, 0x0a
-	.db	"aweMeeblip-SE V2.02 (c) AWe 2011", 0x0d, 0x0a
+	.db	"aweMeeblip-SE V2.04 (c) AWe 2012", 0x0d, 0x0a
 	.db	"   build ", __DATE__, " ", __TIME__, " ", 0x0d, 0x0a
 
 .if MEEBLIP_SE_ORIGINAL_CODE
@@ -10754,36 +7535,14 @@ startup_message:
 ;.endif	; MEEBLIP_V1_27_HW
 
 .if KEEP_BUGS
-	.db	"* keep bugs for meeblip v2.02 compability", 0x0d, 0x0a
-;.else	; KEEP_BUGS
-;	.db	"* bugs fixed", 0x0d, 0x0a
+	.db	"* keep bugs for meeblip v2.04 compability", 0x0d, 0x0a
 .endif	; KEEP_BUGS
 
-.if USE_ORIGINAL_MUL8X8S
-	.db	"* using original USE_ORIGINAL_MUL8X8S subroutine", 0x0d, 0x0a
-.endif	; USE_ORIGINAL_MUL8X8S
-
-.if USE_ORIGINAL_DCO_FM				; 0: use switch for transponse
+.if USE_ORIGINAL_DCO_FM				; 0: use switch for transpose
 	.db	"* using original dco fm ", 0x0d, 0x0a
 .else	; USE_ORIGINAL_DCO_FM
 	.db	"* dco fm section removed", 0x0d, 0x0a
 .endif	; USE_ORIGINAL_DCO_FM
-
-.if !USE_ORIGINAL_WAVETABLES
-	.db	"* use optimized waveform tables ", 0x0d, 0x0a
-.endif	; !USE_ORIGINAL_WAVETABLES
-
-.if USE_BANDLIMITED_DCO_A
-	.db	"* using original dco a", 0x0d, 0x0a
-.else	; USE_BANDLIMITED_DCO_A
-	.db	"* using modified dco a", 0x0d, 0x0a
-.endif	; USE_BANDLIMITED_DCO_A
-
-.if USE_BANDLIMITED_DCO_B
-	.db	"* using original dco b", 0x0d, 0x0a
-.else	; USE_BANDLIMITED_DCO_B
-	.db	"* using modified dco b", 0x0d, 0x0a
-.endif	; USE_BANDLIMITED_DCO_B
 
 .if USE_ORIGINAL_MIXER			; 0: use alternative mixer
 	.db	"* using original mixer", 0x0d, 0x0a
@@ -10946,8 +7705,8 @@ STR_KNOB_AMP_ATTACK:	.db	0x0D, 0x0A, "AMP_ATTACK     ", 0
 .if USE_EXTENDED_MIDI_CONTROL
 STR_PWMDEPTH:		.db	0x0D, 0x0A, "PWMDEPTH       ", 0
 STR_MIDI_KNOB_2: 	.db	0x0D, 0x0A, "MIDI_KNOB_2    ", 0
-STR_MIDI_KNOB_3: 	.db	0x0D, 0x0A, "MIDI_KNOB_2    ", 0
-STR_MIDI_KNOB_4: 	.db	0x0D, 0x0A, "MIDI_KNOB_2    ", 0
+STR_MIDI_KNOB_3: 	.db	0x0D, 0x0A, "MIDI_KNOB_3    ", 0
+STR_MIDI_KNOB_4: 	.db	0x0D, 0x0A, "MIDI_KNOB_4    ", 0
 STR_FMDEPTH:		.db	0x0D, 0x0A, "FMDEPTH        ", 0
 STR_LFO2FREQ:		.db	0x0D, 0x0A, "LFO2FREQ       ", 0
 STR_MIXER_BALANCE:	.db	0x0D, 0x0A, "MIXER_BALANCE  ", 0
