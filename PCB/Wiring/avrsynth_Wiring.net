@@ -1,0 +1,795 @@
+# EESchema Netlist Version 1.1 created  01.07.2012 11:56:31
+(
+ ( /4E2E4DE9 $noname  E29 ZEIGER_20-1_SW {Lib=EMPTY}
+ )
+ ( /4E2E4DE8 $noname  E25 ZEIGER_14-1_SW {Lib=EMPTY}
+ )
+ ( /4E2E4DE7 $noname  E26 ZEIGER_14-1_SW {Lib=EMPTY}
+ )
+ ( /4E2E4DE6 $noname  E27 ZEIGER_14-1_SW {Lib=EMPTY}
+ )
+ ( /4E2E4DE5 $noname  E28 ZEIGER_14-1_SW {Lib=EMPTY}
+ )
+ ( /4E2E4DDD $noname  E24 ZEIGER_14-1_SW {Lib=EMPTY}
+ )
+ ( /4E2E4DDB $noname  E23 ZEIGER_14-1_SW {Lib=EMPTY}
+ )
+ ( /4E2E4DD9 $noname  E22 ZEIGER_14-1_SW {Lib=EMPTY}
+ )
+ ( /4E2E4DCB $noname  E21 ZEIGER_14-1_SW {Lib=EMPTY}
+ )
+ ( /4E2E4D67 $noname  E19 DECKEL_20M_RT {Lib=EMPTY}
+ )
+ ( /4E2E4D64 $noname  E18 DECKEL_14M_BL {Lib=EMPTY}
+ )
+ ( /4E2E4D60 $noname  E17 DECKEL_14M_BL {Lib=EMPTY}
+ )
+ ( /4E2E4D5F $noname  E16 DECKEL_14M_BL {Lib=EMPTY}
+ )
+ ( /4E2E4D5D $noname  E15 DECKEL_14M_BL {Lib=EMPTY}
+ )
+ ( /4E2E4D5B $noname  E14 DECKEL_14M_BL {Lib=EMPTY}
+ )
+ ( /4E2E4D52 $noname  E12 DECKEL_14M_BL {Lib=EMPTY}
+ )
+ ( /4E2E4D49 $noname  E13 DECKEL_14M_BL {Lib=EMPTY}
+ )
+ ( /4E2E4D30 $noname  E11 DECKEL_14M_BL {Lib=EMPTY}
+ )
+ ( /4E2E4D11 $noname  E9 KNOPF_20M-4_SW {Lib=EMPTY}
+ )
+ ( /4E2E4D02 $noname  E33 Flachbandkabel_10-polig_30cm {Lib=EMPTY}
+ )
+ ( /4E2E4D01 $noname  E34 10-pol_Schneidklemm-Buchse {Lib=EMPTY}
+ )
+ ( /4E2E4D00 $noname  E35 Gehäuse {Lib=EMPTY}
+ )
+ ( /4E2E4CFF $noname  E36 IC_Fassungen {Lib=EMPTY}
+ )
+ ( /4E2E4CC5 $noname  E8 KNOPF_14M-4_SW {Lib=EMPTY}
+ )
+ ( /4E2E4CC2 $noname  E7 KNOPF_14M-4_SW {Lib=EMPTY}
+ )
+ ( /4E2E4CB2 $noname  E6 KNOPF_14M-4_SW {Lib=EMPTY}
+ )
+ ( /4E2E4CB1 $noname  E5 KNOPF_14M-4_SW {Lib=EMPTY}
+ )
+ ( /4E2E4CB0 $noname  E4 KNOPF_14M-4_SW {Lib=EMPTY}
+ )
+ ( /4E2E4CAF $noname  E3 KNOPF_14M-4_SW {Lib=EMPTY}
+ )
+ ( /4E2E4CAC $noname  E2 KNOPF_14M-4_SW {Lib=EMPTY}
+ )
+ ( /4E2E4C86 $noname  E1 KNOPF_14M-4_SW {Lib=EMPTY}
+ )
+ ( /4D8544A0 poti_4mm  RV9 47K_LOG {Lib=POT}
+  (    1 N-000098 )
+  (    2 N-000034 )
+  (    3 N-000035 )
+ )
+ ( /4DE94870 $noname  _P4 CONN_8 {Lib=CONN_8}
+  (    1 N-000098 )
+  (    2 N-000034 )
+  (    3 N-000035 )
+  (    4 N-000065 )
+  (    5 N-000036 )
+  (    6 N-000064 )
+  (    7 N-000097 )
+  (    8 N-000085 )
+ )
+ ( /4DE4DFD5 PHAP-3301  SW18 PHAP-3301 {Lib=PHAP-3301}
+  (    1 N-000084 )
+  (    2 N-000084 )
+  (    3 /GND )
+  (    4 /GND )
+ )
+ ( /4D90453A DO35-3  D19 1N4148 {Lib=DIODE}
+  (    1 N-000031 )
+  (    2 /SW_COL0 )
+ )
+ ( /4D904539 DO35-3  D20 1N4148 {Lib=DIODE}
+  (    1 N-000033 )
+  (    2 /SW_COL1 )
+ )
+ ( /4D904538 DO35-3  D21 1N4148 {Lib=DIODE}
+  (    1 N-000032 )
+  (    2 /SW_COL2 )
+ )
+ ( /4D904513 DO35-3  D22 1N4148 {Lib=DIODE}
+  (    1 N-000046 )
+  (    2 /SW_COL3 )
+ )
+ ( /4D9044FB KDR16  SW17 KDR16 {Lib=KDR16}
+  (    1 N-000031 )
+  (    2 N-000037 )
+  (    3 N-000032 )
+  (    4 N-000033 )
+  (    5 N-000037 )
+  (    6 N-000046 )
+ )
+ ( /4D90223B $noname  J5 USB_2 {Lib=USB_2}
+  (    1 N-000083 )
+  (    2 ? )
+  (    3 ? )
+  (    4 N-000096 )
+ )
+ ( /4D8F92ED $noname  _P6 CONN_5 {Lib=CONN_5}
+  (    1 /SW_ROW0 )
+  (    2 /SW_ROW1 )
+  (    3 /SW_ROW2 )
+  (    4 /SW_ROW3 )
+  (    5 N-000037 )
+ )
+ ( /4D8F92E2 $noname  _P2 CONN_5 {Lib=CONN_5}
+  (    1 /SW_COL0 )
+  (    2 /SW_COL1 )
+  (    3 /SW_COL2 )
+  (    4 /SW_COL3 )
+  (    5 ? )
+ )
+ ( /4D8F91C8 DO35-3  D6 1N4148 {Lib=DIODE}
+  (    1 N-000039 )
+  (    2 /SW_COL0 )
+ )
+ ( /4D8F91C7 Kippschalter  SW13 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000039 )
+  (    2 /SW_ROW3 )
+  (    3 ? )
+ )
+ ( /4D8F91C6 Kippschalter  SW14 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000043 )
+  (    2 /SW_ROW3 )
+  (    3 ? )
+ )
+ ( /4D8F91C5 DO35-3  D10 1N4148 {Lib=DIODE}
+  (    1 N-000043 )
+  (    2 /SW_COL1 )
+ )
+ ( /4D8F91C4 Kippschalter  SW15 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000045 )
+  (    2 /SW_ROW3 )
+  (    3 ? )
+ )
+ ( /4D8F91C3 DO35-3  D14 1N4148 {Lib=DIODE}
+  (    1 N-000045 )
+  (    2 /SW_COL2 )
+ )
+ ( /4D8F91C2 Kippschalter  SW16 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000010 )
+  (    2 /SW_ROW3 )
+  (    3 ? )
+ )
+ ( /4D8F91C1 DO35-3  D18 1N4148 {Lib=DIODE}
+  (    1 N-000010 )
+  (    2 /SW_COL3 )
+ )
+ ( /4D8F91C0 DO35-3  D5 1N4148 {Lib=DIODE}
+  (    1 N-000011 )
+  (    2 /SW_COL0 )
+ )
+ ( /4D8F91BF Kippschalter  SW9 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000011 )
+  (    2 /SW_ROW2 )
+  (    3 ? )
+ )
+ ( /4D8F91BE Kippschalter  SW10 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000015 )
+  (    2 /SW_ROW2 )
+  (    3 ? )
+ )
+ ( /4D8F91BD DO35-3  D9 1N4148 {Lib=DIODE}
+  (    1 N-000015 )
+  (    2 /SW_COL1 )
+ )
+ ( /4D8F91BC Kippschalter  SW11 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000002 )
+  (    2 /SW_ROW2 )
+  (    3 ? )
+ )
+ ( /4D8F91BB DO35-3  D13 1N4148 {Lib=DIODE}
+  (    1 N-000002 )
+  (    2 /SW_COL2 )
+ )
+ ( /4D8F91BA Kippschalter  SW12 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000004 )
+  (    2 /SW_ROW2 )
+  (    3 ? )
+ )
+ ( /4D8F91B9 DO35-3  D17 1N4148 {Lib=DIODE}
+  (    1 N-000004 )
+  (    2 /SW_COL3 )
+ )
+ ( /4D8F91A2 DO35-3  D4 1N4148 {Lib=DIODE}
+  (    1 N-000006 )
+  (    2 /SW_COL0 )
+ )
+ ( /4D8F91A1 Kippschalter  SW5 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000006 )
+  (    2 /SW_ROW1 )
+  (    3 ? )
+ )
+ ( /4D8F91A0 Kippschalter  SW6 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000025 )
+  (    2 /SW_ROW1 )
+  (    3 ? )
+ )
+ ( /4D8F919F DO35-3  D8 1N4148 {Lib=DIODE}
+  (    1 N-000025 )
+  (    2 /SW_COL1 )
+ )
+ ( /4D8F919E Kippschalter  SW7 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000028 )
+  (    2 /SW_ROW1 )
+  (    3 ? )
+ )
+ ( /4D8F919D DO35-3  D12 1N4148 {Lib=DIODE}
+  (    1 N-000028 )
+  (    2 /SW_COL2 )
+ )
+ ( /4D8F919C Kippschalter  SW8 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000030 )
+  (    2 /SW_ROW1 )
+  (    3 ? )
+ )
+ ( /4D8F919B DO35-3  D16 1N4148 {Lib=DIODE}
+  (    1 N-000030 )
+  (    2 /SW_COL3 )
+ )
+ ( /4D8F9186 DO35-3  D15 1N4148 {Lib=DIODE}
+  (    1 N-000018 )
+  (    2 /SW_COL3 )
+ )
+ ( /4D8F9185 Kippschalter  SW4 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000018 )
+  (    2 /SW_ROW0 )
+  (    3 ? )
+ )
+ ( /4D8F917C DO35-3  D11 1N4148 {Lib=DIODE}
+  (    1 N-000021 )
+  (    2 /SW_COL2 )
+ )
+ ( /4D8F917B Kippschalter  SW3 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000021 )
+  (    2 /SW_ROW0 )
+  (    3 ? )
+ )
+ ( /4D8F9177 DO35-3  D7 1N4148 {Lib=DIODE}
+  (    1 N-000023 )
+  (    2 /SW_COL1 )
+ )
+ ( /4D8F9176 Kippschalter  SW2 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000023 )
+  (    2 /SW_ROW0 )
+  (    3 ? )
+ )
+ ( /4D8F90F8 Kippschalter  SW1 SWITCH_INV {Lib=SWITCH_INV}
+  (    1 N-000079 )
+  (    2 /SW_ROW0 )
+  (    3 ? )
+ )
+ ( /4D8F90CD DO35-3  D3 1N4148 {Lib=DIODE}
+  (    1 N-000079 )
+  (    2 /SW_COL0 )
+ )
+ ( /4D8F3258 C2  C2 100nF {Lib=C}
+  (    1 N-000074 )
+  (    2 N-000099 )
+ )
+ ( /4D8F3203 C1V5  C1 10uF/35V {Lib=C_POL}
+  (    1 N-000074 )
+  (    2 N-000099 )
+ )
+ ( /4D8F2F1E poti_4mm  RV3 47K_LIN {Lib=POT}
+  (    1 N-000074 )
+  (    2 N-000080 )
+  (    3 N-000099 )
+ )
+ ( /4D8F2F14 poti_4mm  RV8 47K_LIN {Lib=POT}
+  (    1 N-000074 )
+  (    2 N-000081 )
+  (    3 N-000099 )
+ )
+ ( /4D8F2F11 poti_4mm  RV7 47K_LIN {Lib=POT}
+  (    1 N-000074 )
+  (    2 N-000076 )
+  (    3 N-000099 )
+ )
+ ( /4D8F2F08 poti_4mm  RV6 47K_LIN {Lib=POT}
+  (    1 N-000074 )
+  (    2 N-000100 )
+  (    3 N-000099 )
+ )
+ ( /4D8F2EDF poti_4mm  RV5 47K_LIN {Lib=POT}
+  (    1 N-000074 )
+  (    2 N-000077 )
+  (    3 N-000099 )
+ )
+ ( /4D8F2ED3 poti_4mm  RV4 47K_LIN {Lib=POT}
+  (    1 N-000074 )
+  (    2 N-000075 )
+  (    3 N-000099 )
+ )
+ ( /4D8F2CE5 $noname  _P1 CONN_10 {Lib=CONN_10}
+  (    1 N-000099 )
+  (    2 N-000081 )
+  (    3 N-000076 )
+  (    4 N-000100 )
+  (    5 N-000077 )
+  (    6 N-000075 )
+  (    7 N-000080 )
+  (    8 N-000088 )
+  (    9 N-000089 )
+  (   10 N-000074 )
+ )
+ ( /4D8B45E7 $noname  P5 9V-BATTERIE-CLIP {Lib=9V-BATTERIE-CLIP}
+  (    1 N-000071 )
+  (    2 N-000096 )
+ )
+ ( /4D890BE4 $noname  _P16 CONN_3 {Lib=CONN_3}
+  (    1 N-000091 )
+  (    2 N-000084 )
+  (    3 /GND )
+ )
+ ( /4D890BA8 LED_5mm  D1 LED_red {Lib=LED}
+  (    1 N-000091 )
+  (    2 /GND )
+ )
+ ( /4D88DCE1 poti_4mm  RV1 47K_LIN {Lib=POT}
+  (    1 N-000074 )
+  (    2 N-000089 )
+  (    3 N-000099 )
+ )
+ ( /4D88DB85 $noname  _P13 CONN_3 {Lib=CONN_3}
+  (    1 N-000082 )
+  (    2 N-000083 )
+  (    3 N-000096 )
+ )
+ ( /4D88D951 Jack-3.5-Stereo-SW  J3 JACK-STEREO-SW_3.5 {Lib=JACK-STEREO-SW}
+  (    1 N-000085 )
+  (    2 N-000087 )
+  (    3 ? )
+  (    4 N-000087 )
+ )
+ ( /4D88D8AD poti_4mm  RV2 47K_LIN {Lib=POT}
+  (    1 N-000074 )
+  (    2 N-000088 )
+  (    3 N-000099 )
+ )
+ ( /4D88D6DA $noname  _P9 CONN_3 {Lib=CONN_3}
+  (    1 N-000057 )
+  (    2 N-000073 )
+  (    3 N-000056 )
+ )
+ ( /4D88D6D3 $noname  _P10 CONN_3 {Lib=CONN_3}
+  (    1 N-000061 )
+  (    2 N-000062 )
+  (    3 N-000060 )
+ )
+ ( /4D88BC0E $noname  _P11 CONN_3 {Lib=CONN_3}
+  (    1 N-000063 )
+  (    2 ? )
+  (    3 N-000092 )
+ )
+ ( /4D88B62B Jack-6.35-Stereo  J1 JACK-STEREO_6.35 {Lib=JACK-STEREO}
+  (    1 N-000064 )
+  (    2 N-000036 )
+  (    3 N-000065 )
+ )
+ ( /4D88B39F Jack-6.35-Stereo-SW  J4 JACK-STEREO-SW_6.35 {Lib=JACK-STEREO-SW}
+  (    1 N-000085 )
+  (    2 N-000097 )
+  (    3 N-000087 )
+  (    4 N-000097 )
+ )
+ ( /4D88AE1B $noname  P2 DIN-BUCHSE-5POL {Lib=DIN-BUCHSE-5POL}
+  (    1 ? )
+  (    2 ? )
+  (    3 ? )
+  (    4 N-000092 )
+  (    5 N-000063 )
+ )
+ ( /4D88AE0C $noname  P4 DIN-BUCHSE-5POL {Lib=DIN-BUCHSE-5POL}
+  (    1 ? )
+  (    2 N-000073 )
+  (    3 ? )
+  (    4 N-000056 )
+  (    5 N-000057 )
+ )
+ ( /4D88ADFC $noname  P3 DIN-BUCHSE-5POL {Lib=DIN-BUCHSE-5POL}
+  (    1 ? )
+  (    2 N-000062 )
+  (    3 ? )
+  (    4 N-000060 )
+  (    5 N-000061 )
+ )
+ ( /4D8544BE $noname  J2 JACK_2P {Lib=JACK_2P}
+  (    1 N-000082 )
+  (    2 N-000071 )
+  (    3 N-000096 )
+ )
+ ( /4D853C56 $noname  P1 SUBD-F09D {Lib=SUBD-F09D}
+  (    1 /DCD )
+  (    2 /RXD )
+  (    3 /TXD )
+  (    4 /DTR )
+  (    5 /GND )
+  (    6 /DSR )
+  (    7 /RTS )
+  (    8 /CTS )
+  (    9 /RT )
+ )
+ ( /4D853C40 $noname  P6 CONN_5X2 {Lib=CONN_5X2}
+  (    1 /DCD )
+  (    2 /DSR )
+  (    3 /RXD )
+  (    4 /RTS )
+  (    5 /TXD )
+  (    6 /CTS )
+  (    7 /DTR )
+  (    8 /RT )
+  (    9 /GND )
+  (   10 ? )
+ )
+)
+*
+{ Allowed footprints by component:
+$component D19
+ D?
+ S*
+$endlist
+$component D20
+ D?
+ S*
+$endlist
+$component D21
+ D?
+ S*
+$endlist
+$component D22
+ D?
+ S*
+$endlist
+$component D6
+ D?
+ S*
+$endlist
+$component D10
+ D?
+ S*
+$endlist
+$component D14
+ D?
+ S*
+$endlist
+$component D18
+ D?
+ S*
+$endlist
+$component D5
+ D?
+ S*
+$endlist
+$component D9
+ D?
+ S*
+$endlist
+$component D13
+ D?
+ S*
+$endlist
+$component D17
+ D?
+ S*
+$endlist
+$component D4
+ D?
+ S*
+$endlist
+$component D8
+ D?
+ S*
+$endlist
+$component D12
+ D?
+ S*
+$endlist
+$component D16
+ D?
+ S*
+$endlist
+$component D15
+ D?
+ S*
+$endlist
+$component D11
+ D?
+ S*
+$endlist
+$component D7
+ D?
+ S*
+$endlist
+$component D3
+ D?
+ S*
+$endlist
+$component C2
+ SM*
+ C?
+ C1-1
+$endlist
+$endfootprintlist
+}
+{ Pin List by Nets
+Net 2 "" ""
+ SW11 1
+ D13 1
+Net 4 "" ""
+ SW12 1
+ D17 1
+Net 5 "/SW_COL0" "SW_COL0"
+ D5 2
+ D19 2
+ D3 2
+ _P2 1
+ D6 2
+ D4 2
+Net 6 "" ""
+ SW5 1
+ D4 1
+Net 7 "/SW_ROW1" "SW_ROW1"
+ SW8 2
+ _P6 2
+ SW7 2
+ SW6 2
+ SW5 2
+Net 10 "" ""
+ D18 1
+ SW16 1
+Net 11 "" ""
+ D5 1
+ SW9 1
+Net 12 "/SW_ROW2" "SW_ROW2"
+ _P6 3
+ SW12 2
+ SW9 2
+ SW11 2
+ SW10 2
+Net 15 "" ""
+ D9 1
+ SW10 1
+Net 16 "/SW_COL2" "SW_COL2"
+ D11 2
+ D12 2
+ D13 2
+ _P2 3
+ D14 2
+ D21 2
+Net 17 "/SW_COL3" "SW_COL3"
+ _P2 4
+ D17 2
+ D18 2
+ D22 2
+ D16 2
+ D15 2
+Net 18 "" ""
+ SW4 1
+ D15 1
+Net 19 "/SW_ROW0" "SW_ROW0"
+ SW2 2
+ _P6 1
+ SW1 2
+ SW4 2
+ SW3 2
+Net 21 "" ""
+ SW3 1
+ D11 1
+Net 23 "" ""
+ D7 1
+ SW2 1
+Net 25 "" ""
+ D8 1
+ SW6 1
+Net 26 "/SW_COL1" "SW_COL1"
+ D10 2
+ D8 2
+ D9 2
+ D7 2
+ D20 2
+ _P2 2
+Net 28 "" ""
+ SW7 1
+ D12 1
+Net 30 "" ""
+ SW8 1
+ D16 1
+Net 31 "" ""
+ SW17 1
+ D19 1
+Net 32 "" ""
+ SW17 3
+ D21 1
+Net 33 "" ""
+ SW17 4
+ D20 1
+Net 34 "" ""
+ RV9 2
+ _P4 2
+Net 35 "" ""
+ RV9 3
+ _P4 3
+Net 36 "" ""
+ J1 2
+ _P4 5
+Net 37 "" ""
+ SW17 2
+ SW17 5
+ _P6 5
+Net 39 "" ""
+ D6 1
+ SW13 1
+Net 43 "" ""
+ SW14 1
+ D10 1
+Net 45 "" ""
+ D14 1
+ SW15 1
+Net 46 "" ""
+ SW17 6
+ D22 1
+Net 50 "/SW_ROW3" "SW_ROW3"
+ SW16 2
+ _P6 4
+ SW15 2
+ SW13 2
+ SW14 2
+Net 56 "" ""
+ P4 4
+ _P9 3
+Net 57 "" ""
+ _P9 1
+ P4 5
+Net 60 "" ""
+ P3 4
+ _P10 3
+Net 61 "" ""
+ P3 5
+ _P10 1
+Net 62 "" ""
+ P3 2
+ _P10 2
+Net 63 "" ""
+ _P11 1
+ P2 5
+Net 64 "" ""
+ J1 1
+ _P4 6
+Net 65 "" ""
+ _P4 4
+ J1 3
+Net 66 "/RXD" "RXD"
+ P1 2
+ P6 3
+Net 67 "/TXD" "TXD"
+ P6 5
+ P1 3
+Net 68 "/CTS" "CTS"
+ P6 6
+ P1 8
+Net 70 "/RTS" "RTS"
+ P6 4
+ P1 7
+Net 71 "" ""
+ J2 2
+ P5 1
+Net 72 "/RT" "RT"
+ P6 8
+ P1 9
+Net 73 "" ""
+ P4 2
+ _P9 2
+Net 74 "" ""
+ RV8 1
+ RV2 1
+ RV4 1
+ RV3 1
+ C1 1
+ C2 1
+ _P1 10
+ RV1 1
+ RV7 1
+ RV6 1
+ RV5 1
+Net 75 "" ""
+ RV4 2
+ _P1 6
+Net 76 "" ""
+ _P1 3
+ RV7 2
+Net 77 "" ""
+ RV5 2
+ _P1 5
+Net 79 "" ""
+ D3 1
+ SW1 1
+Net 80 "" ""
+ RV3 2
+ _P1 7
+Net 81 "" ""
+ _P1 2
+ RV8 2
+Net 82 "" ""
+ _P13 1
+ J2 1
+Net 83 "" ""
+ J5 1
+ _P13 2
+Net 84 "" ""
+ SW18 2
+ _P16 2
+ SW18 1
+Net 85 "" ""
+ _P4 8
+ J4 1
+ J3 1
+Net 87 "" ""
+ J4 3
+ J3 4
+ J3 2
+Net 88 "" ""
+ RV2 2
+ _P1 8
+Net 89 "" ""
+ RV1 2
+ _P1 9
+Net 90 "/DTR" "DTR"
+ P6 7
+ P1 4
+Net 91 "" ""
+ _P16 1
+ D1 1
+Net 92 "" ""
+ _P11 3
+ P2 4
+Net 93 "/DSR" "DSR"
+ P1 6
+ P6 2
+Net 94 "/DCD" "DCD"
+ P1 1
+ P6 1
+Net 95 "/GND" "GND"
+ SW18 4
+ SW18 3
+ D1 2
+ _P16 3
+ P1 5
+ P6 9
+Net 96 "" ""
+ _P13 3
+ J5 4
+ J2 3
+ P5 2
+Net 97 "" ""
+ J4 2
+ J4 4
+ _P4 7
+Net 98 "" ""
+ _P4 1
+ RV9 1
+Net 99 "" ""
+ _P1 1
+ RV8 3
+ RV2 3
+ RV6 3
+ RV7 3
+ RV1 3
+ RV5 3
+ RV4 3
+ C2 2
+ RV3 3
+ C1 2
+Net 100 "" ""
+ RV6 2
+ _P1 4
+}
+#End
