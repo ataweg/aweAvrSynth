@@ -1,1 +1,14 @@
-my derivation of avrSynth and meeblip virtual synthesizer
+My version of a virtual analog synthesizer, derived from Meeblip synthesizer, with much enhancements and improvements:
+The most important are:
+ * Much more of the sound parameters can be controlled via MIDI, the expanded MIDI mapping for my keyboard is based on the knobs and sliders of a QX49
+ * Modified waveform tables, A and B have separate oscillator wavetable parameters.
+ * Re-introducing some of the switches and controls from Meeblip V1.05, this can be controlled via MIDI
+ * Master volume control via MIDI. It can also be raised the volume.
+ * Ring Modulator for metallic sounds
+ * Noise generator now makes more or less white noise - new algorithm
+ * VCFENVMOD now ranging from -128 to +127.
+ * PWM generation needs only one sawooth table.
+ * Patch 1 has a default setting and can not be overwritten.
+ * The volume is keep constant, when OSC B is switched on or off.
+ * The button "dco fm" and "anti-alias" sacrificed for "ring modulator" and "transpose"
+
