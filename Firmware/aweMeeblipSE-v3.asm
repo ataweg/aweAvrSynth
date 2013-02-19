@@ -6,14 +6,19 @@
 
 	.set	MEEBLIP_V1_31_HW	= 0	; 0: use my cloned&modified pcb version 1.27
 	.set	MEEBLIP_MICRO_V2_04_HW	= 0	; dto.
-	.set	USE_UART		= 1 & !MEEBLIP_V1_31_HW & !MEEBLIP_MICRO_V2_04_HW
+
+	.set	USE_SERIAL_OUT		= 1 & !MEEBLIP_V1_31_HW & !MEEBLIP_MICRO_V2_04_HW
+	.set	USE_DEBUG_OUT		= 1 & USE_SERIAL_OUT
+
+	.set	MEEBLIP_VERSION		= 303
 
 ;----------------------------------------------------------------------------
 ; process defines from command line
 ; valid defines are:
 ;  _MEEBLIP_V1_31_HW
 ;  _MEEBLIP_MICRO_V2_04_HW
-;  _USE_UART
+;  _USE_SERIAL_OUT
+;  _USE_DEBUG_OUT
 ;----------------------------------------------------------------------------
 
 #if defined( _MEEBLIP_V1_31_HW)
@@ -24,10 +29,16 @@
 	.set	MEEBLIP_MICRO_V2_04_HW	= _MEEBLIP_MICRO_V2_04_HW
 #endif
 
-#if defined( _USE_UART)
-	.set	USE_UART		= _USE_UART & !MEEBLIP_V1_31_HW & !MEEBLIP_MICRO_V2_04_HW
+#if defined( _USE_SERIAL_OUT)
+	.set	USE_SERIAL_OUT		= _USE_SERIAL_OUT & !MEEBLIP_V1_31_HW & !MEEBLIP_MICRO_V2_04_HW
 #else
-	.set	USE_UART		=  USE_UART & !MEEBLIP_V1_31_HW & !MEEBLIP_MICRO_V2_04_HW
+	.set	USE_SERIAL_OUT		=  USE_SERIAL_OUT & !MEEBLIP_V1_31_HW & !MEEBLIP_MICRO_V2_04_HW
+#endif
+
+#if defined( _USE_DEBUG_OUT)
+	.set	USE_DEBUG_OUT		= _USE_DEBUG_OUT & !MEEBLIP_V1_31_HW & !MEEBLIP_MICRO_V2_04_HW
+#else
+	.set	USE_DEBUG_OUT		=  USE_DEBUG_OUT & USE_SERIAL_OUT
 #endif
 
 ;----------------------------------------------------------------------------
@@ -38,9 +49,34 @@
 ;
 ; requires asm2 assembler, asm leads to some undefined variable errors
 ;
+;----------------------------------------------------------------------------
+; Todo
+;			* prevent wrong serial out when changing baudrate
+;			* send debug messages as sys control
+;
+;			* arpeggiator: play a captured or preloaded sequence of notes
+;
+;----------------------------------------------------------------------------
 ; Changelog
 ;
-;
+; 2013.02.13	AWe	new option: play arpeggiator notes only once
+;                       capture all notes, discard oldest note in buffer, if buffer is full
+;			start release phase also for filter envelope generator when key is released.
+; 2013.02.08	AWe	remove gaps in NOTES_BUFFER in any case
+;			move startup initialisation to end of code block
+;			use new TIMETORATE table with 64 or 128 values
+; 2013.02.04	AWe	aweMeeblipSE_V3.03.asm
+;			add arpeggiator (inspired by code from Daniel Kruszyna)
+;			* new switches: DISTORTION => LFO_ENABLE, ARP_REPEAT => DISTORTION, ARP_ENABLE => FILTER_MODE
+;			* new knobs: ARP_RATE => upper OSC_B_DETUNE, ARP_THRESHOLD => PWM_WITDH
+;----------------------------------------------------------------------------
+; 2013.01.20	AWe	fix midi out value range to 0..127
+; 2012.11.16	AWe	switch to enable/disable debug mode, send midi cc
+; 2012.11.14	AWe	ADC-Filter, to prevent LSB toggling
+;			inhibit midi out for switches when used as input for button commands
+; 2012.11.06	AWe	Add midi out for knobs and switches (send on change)
+;			using an interrupt driven serial output with a buffer of 16 or more bytes
+;			sending a byte needs 320us, so a 3 byte change coontrol message requires 1 ms to transmit
 ; 2012.10.19	AWe	let the oscillator running, but stop it when there is no VCA output
 ; 2012.10.12	AWe	add support for meeblip-micro
 ;			- Assign individual switches instead of switch matrix
@@ -262,9 +298,13 @@
 ;
 ;----------------------------------------------------------------------------
 
-	.equ	USE_ORIGINAL_DCO_FM		= 1	; 0: use switch for transpose
+	.equ	USE_ORIGINAL_DCO_FM		= 1
 	.equ	USE_ORIGINAL_RAW_OSC		= 1	; 0: use switch for Ringmodulator enable, set SW_ANTI_ALIAS to 1
 	.equ	USE_ORIGINAL_MIXER_LEVEL	= 1	; 0: 6 db more output level, 1: (recommended)
+
+	.equ	USE_TIMETORATE_64		= 0
+	.equ	USE_TIMETORATE_128		= 1
+	.equ	USE_ARP_TIMETORATE_128		= 1
 
 	.equ	USE_DCA_MOD_SWITCH		= 1
 	.equ	USE_EXTENDED_LFO2		= 0	; 1: add waveform selection to lfo2 tri, sqr, random
@@ -275,21 +315,32 @@
 	.equ	USE_MIDI_PWMDEPTH		= 1
 	.equ	USE_SUSTAIN_UPDATE_ON_NOTE	= 0	; not used yet
 	.equ	USE_SYNC_LFO2			= 1
-	.equ	USE_TRANSPOSE_SWITCH		= 1
+	.equ	USE_TRANSPOSE_SWITCH		= 1	; 1: use DCO_FM switch for transpose
 
 	.equ	USE_MASTER_VOLUME		= 1	; 0: master volume control; 1: control it via MIDI cc
 	.equ	USE_READ_ONLY_PATCH_ZERO	= 1	; 0: can overwrite of patch 0, 1: protect patch 0 for overwriting
 	.equ	USE_RINGMODULATOR		= 1
 	.equ	USE_RINGMODULATOR_BALANCE	= 1
+	.equ	USE_ARPEGGIATOR			= 1
+	.equ	USE_MIDI_OUT			= 1 & (USE_SERIAL_OUT | USE_DEBUG_OUT)
 
-	.equ	Q_OFFSET	= 16
-	.equ	PARAM_DEAD_ZONE	= 3
+	.equ	FILL_UP_WITH_DEFAULT_PATCH	= 1
+
+	.equ	Q_OFFSET		= 16
+	.equ	PARAM_DEAD_ZONE		= 5
+	.equ	ARP_THRESHOLD_MIN	= 8
+
+
+.if USE_SERIAL_OUT
+	.equ	UART_TX_BUFFER_SIZE		= 256			; maximum value
+	.equ	UART_TX_BUFFER_MASK		= UART_TX_BUFFER_SIZE - 1
+.endif	; USE_SERIAL_OUT
 
 ;----------------------------------------------------------------------------
 ;
 ;----------------------------------------------------------------------------
 
-	;.nolist
+	.nolist
 
 .message ""
 .message "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
@@ -299,7 +350,7 @@
 .elif MEEBLIP_V1_31_HW != 0
   .message "* Build for original Meeblip SE hardware"
 .else
-  .if USE_UART == 0
+  .if USE_SERIAL_OUT == 0
     .message "* Build for avrSynth hardware"
   .else
     .message "* Build for avrSynth hardware using uart"
@@ -316,8 +367,10 @@
 ;----------------------------------------------------------------------------
 
 	.equ	cpu_frequency	= 16000000
-	.equ	baud_rate	= 31250
+	.equ	midi_baud_rate	= 31250
 	.equ	KBDSCAN		= 6250
+
+ 	.equ	NOTES_BUFFERSIZE= 8	; number of midi notes to remember
 
 .if MEEBLIP_V1_31_HW || MEEBLIP_MICRO_V2_04_HW
 	.equ	PORT_MIDI_LED	= PORTD
@@ -392,204 +445,243 @@
 	.dseg
 
 ; MIDI:
-MIDIPHASE:		.byte 1
-MIDICHANNEL:		.byte 1
-MIDIDATA0:		.byte 1
-MIDIVELOCITY:		.byte 1
-MIDINOTE:		.byte 1
-MIDINOTEPREV:		.byte 1		; buffer for MIDI note
-MIDIPBEND_L:		.byte 1		; \
-MIDIPBEND_H:		.byte 1		; / -32768..+32766
+MIDIPHASE:		.byte	1
+MIDICHANNEL:		.byte	1
+MIDIDATA0:		.byte	1
+MIDIVELOCITY:		.byte	1
+MIDINOTE:		.byte	1
+.if !USE_ARPEGGIATOR
+MIDINOTEPREV:		.byte	1	; buffer for MIDI note
+.else	; !USE_ARPEGGIATOR
+MIDINOTE_NEXT:		.byte	1
+.endif ; !USE_ARPEGGIATOR
+MIDIPBEND_L:		.byte	1	; \
+MIDIPBEND_H:		.byte	1	; / -32768..+32766
 
 ; current sound parameters:
-LFOLEVEL:		.byte 1		; 0..255
-KNOB_SHIFT:		.byte 1		; 0= unchanged 255= changed state (not used)
-POWER_UP:		.byte 1		; 255 = Synth just turned on, 0 = normal operation
-KNOB0_STATUS:		.byte 1		; Each byte corresponds to a panel knob.
-KNOB1_STATUS:		.byte 1		; 0 = pot not updated since Knob Shift switch change
-KNOB2_STATUS:		.byte 1		; 1 = pot has been updated.
-KNOB3_STATUS:		.byte 1
-KNOB4_STATUS:		.byte 1
-KNOB5_STATUS:		.byte 1
-KNOB6_STATUS:		.byte 1
-KNOB7_STATUS:		.byte 1
+LFOLEVEL:		.byte	1	; 0..255
+KNOB_SHIFT:		.byte	1	; 0= unchanged 255= changed state (not used)
+POWER_UP:		.byte	1	; 255 = Synth just turned on, 0 = normal operation
+KNOB0_STATUS:		.byte	1	; Each byte corresponds to a panel knob.
+KNOB1_STATUS:		.byte	1	; bit 0: 0 = pot not updated since Knob Shift switch change
+KNOB2_STATUS:		.byte	1	; 1 = pot has been updated.
+KNOB3_STATUS:		.byte	1
+KNOB4_STATUS:		.byte	1
+KNOB5_STATUS:		.byte	1
+KNOB6_STATUS:		.byte	1
+KNOB7_STATUS:		.byte	1
 
-SWITCH1:		.byte 1
-SWITCH2:		.byte 1
-OLD_SWITCH1:		.byte 1		; Previous switch values (used to flag switch changes)
-OLD_SWITCH2:		.byte 1
+SWITCH1:		.byte	1
+SWITCH2:		.byte	1
+OLD_SWITCH1:		.byte	1	; Previous switch values (used to flag switch changes)
+OLD_SWITCH2:		.byte	1
 
 ; Switch value currently used (from front panel, MIDI or last loaded patch)
-PATCH_SWITCH1:		.byte 1
+PATCH_SWITCH1:		.byte	1
 	.equ	SW_KNOB_SHIFT	= 0	; 0=lower, 1=upper
-	.equ	SW_OSC_FM	= 1	;
+	.equ	SW_OSC_FM	= 1	; 0=off, 1=on
 	.equ	SW_LFO_RANDOM	= 2	; 0=norm, 1=rand
 	.equ	SW_LFO_WAVE	= 3	; 0=tri, 1=squ
 	.equ	SW_FILTER_MODE	= 4	; 0=lp, 1=hp
 	.equ	SW_DISTORTION	= 5	; 0=off, 1=on
-	.equ	SW_LFO_ENABLE	= 6	;
+	.equ	SW_LFO_ENABLE	= 6	; 0=off, 1=on
 	.equ	SW_LFO_DEST	= 7	; 0=DCF, 1=DCO
 
-PATCH_SWITCH2:		.byte 1
-	.equ	SW_ANTI_ALIAS	= 0	;
+PATCH_SWITCH2:		.byte	1
+	.equ	SW_ANTI_ALIAS	= 0	; 0=off, 1=on
 	.equ	SW_OSCB_OCT	= 1	; 0=down, 1=up
 	.equ	SW_OSCB_ENABLE	= 2	; 0=off, 1=on
 	.equ	SW_OSCB_WAVE	= 3	; 0=saw, 1=squ
-	.equ	SW_SUSTAIN	= 4	;
+	.equ	SW_SUSTAIN	= 4	; 0=ADR, 1=ASR
 	.equ	SW_OSCA_NOISE	= 5	; 0=off, 1=on
 	.equ	SW_PWM_SWEEP	= 6	; 0=off, 1=LFO2
 	.equ	SW_OSCA_WAVE	= 7	; 0=saw, 1=squ
 
-PATCH_SWITCH3:		.byte 1
+PATCH_SWITCH3:		.byte	1
 	.equ	SW_MIX_RING	= 0	; 0=Mixer(default), 1=Ringmodulator
-	.equ	SW_VELOCITY	= 1	;
-	.equ	SW_USER_3_2	= 2	;
-	.equ	SW_TRANSPOSE	= 3	; 0=down, 1=up (default)
-	.equ	SW_DCA_MODE	= 4	; 0=gate, 1=env (default)
+	.equ	SW_VELOCITY	= 1	; 0=off, 1=on
+	.equ	SW_DCA_MODE	= 2	; 0=gate, 1=env (default)
+	.equ	SW_DCA_OPEN	= 3	; 0=norm, 1=open
+	.equ	SW_TRANSPOSE	= 4	; 0=down, 1=up (default)
 	.equ	SW_MODWHEEL_ENA	= 5	; 0=diable, 1=enable (default)
 	.equ	SW_LFO_KBD_SYNC	= 6	; 0=off, 1=on (default)
 	.equ	SW_DCF_KBD_TRACK= 7	; 0=off, 1=on (default)
 
-PATCH_SWITCH4:		.byte 1
-	.equ	SW_USER_4_0	= 0	;
-	.equ	SW_USER_4_1	= 1	;
-	.equ	SW_USER_4_2	= 2	;
-	.equ	SW_USER_4_3	= 3	;
-	.equ	SW_USER_4_4	= 4	;
-	.equ	SW_USER_4_5	= 5	;
+PATCH_SWITCH4:		.byte	1
+	.equ	SW_USER_4_0	= 0	; not used
+	.equ	SW_USER_4_1	= 1	; not used
+	.equ	SW_ARP_ENABLE	= 2	;
+	.equ	SW_ARP_REPEAT	= 3	;
+	.equ	SW_USER_4_4	= 4	; not used
+	.equ	SW_USER_4_5	= 5	; not used
 	.equ	SW_LFO2_WAVE	= 6	; 0=tri, 1=squ
 	.equ	SW_LFO2_RANDOM	= 7	; 0=norm, 1=rand
 
-SWITCH3:		.byte 1		; b0: MIDI SWITCH 1
+SWITCH3:		.byte	1	; b0: MIDI SWITCH 1
 					; b1: MIDI SWITCH 2
 					; b2: MIDI SWITCH 3
 					; b3: MIDI SWITCH 4
 
-SETMIDICHANNEL:		.byte 1		; selected MIDI channel: 0 for OMNI or 1..15
-DETUNEB_FRAC:		.byte 1		; \
-DETUNEB_INTG:		.byte 1		; / -128,000..+127,996
+SETMIDICHANNEL:		.byte	1	; selected MIDI channel: 0 for OMNI or 1..15
+DETUNEB_FRAC:		.byte	1	; \
+DETUNEB_INTG:		.byte	1	; / -128,000..+127,996
 
-NOTE_L:			.byte 1
-NOTE_H:			.byte 1
-NOTE_INTG:		.byte 1
-PORTACNT:		.byte 1		; 2 / 1 / 0
-LPF_I:			.byte 1
-HPF_I:			.byte 1
-LEVEL:			.byte 1		; 0..255
-PITCH:			.byte 1		; 0..96
-ADC_CHAN:		.byte 1		; 0..7
-PREV_ADC_CHAN:		.byte 1		; 0..7
-ADC_0:			.byte 1		; Panel knob values.
-ADC_1:			.byte 1
-ADC_2:			.byte 1
-ADC_3:			.byte 1
-ADC_4:			.byte 1
-ADC_5:			.byte 1
-ADC_6:			.byte 1
-ADC_7:			.byte 1
-OLD_ADC_0:		.byte 1		; Previous panel knob value
-OLD_ADC_1:		.byte 1
-OLD_ADC_2:		.byte 1
-OLD_ADC_3:		.byte 1
-OLD_ADC_4:		.byte 1
-OLD_ADC_5:		.byte 1
-OLD_ADC_6:		.byte 1
-OLD_ADC_7:		.byte 1
-GATE:			.byte 1		; 0 / 1
-GATEEDGE:		.byte 1		; 0 / 1
-TPREV_KBD_L:		.byte 1
-TPREV_KBD_H:		.byte 1
-TPREV_L:		.byte 1
-TPREV_H:		.byte 1
-DELTAT_L:		.byte 1		; \ Time from former course
-DELTAT_H:		.byte 1		; / of the main loop (1 bit = 32 탎)
+NOTE_L:			.byte	1
+NOTE_H:			.byte	1
+NOTE_INTG:		.byte	1
+PORTACNT:		.byte	1	; 2 / 1 / 0: no note / first note / next note
+LPF_I:			.byte	1
+HPF_I:			.byte	1
+LEVEL:			.byte	1	; 0..255
+PITCH:			.byte	1	; 0..96
+ADC_CHAN:		.byte	1	; 0..7
+PREV_ADC_CHAN:		.byte	1	; 0..7
+					; Panel knob values.
+ADC_0:			.byte	1	;   RESONANCE
+ADC_1:			.byte	1	;   CUTOFF
+ADC_2:			.byte	1	;   LFOFREQ / KNOB_DCF_DECAY
+ADC_3:			.byte	1	;   LFOLEVEL = PANEL_LFOLEVEL / KNOB_DCF_ATTACK = ATTACKTIME2
+ADC_4:			.byte	1	;   VCFENVMOD / KNOB_AMP_DECAY
+ADC_5:			.byte	1	;   PORTAMENTO / KNOB_AMP_ATTACK = ATTACKTIME
+ADC_6:			.byte	1	;   PULSE_KNOB = LFO2FREQ
+ADC_7:			.byte	1	;   OSC_DETUNE
+OLD_ADC_0:		.byte	1	; Previous panel knob value
+OLD_ADC_1:		.byte	1
+OLD_ADC_2:		.byte	1
+OLD_ADC_3:		.byte	1
+OLD_ADC_4:		.byte	1
+OLD_ADC_5:		.byte	1
+OLD_ADC_6:		.byte	1
+OLD_ADC_7:		.byte	1
 
-ENVPHASE:		.byte 1		; 0=stop 1=attack 2=decay 3=sustain 4=release
-ENV_FRAC_L:		.byte 1
-ENV_FRAC_H:		.byte 1
-ENV_INTEGR:		.byte 1
+GATE:			.byte	1	; 0 / 1
+GATEEDGE:		.byte	1	; 0 / 1
+TPREV_KBD_L:		.byte	1
+TPREV_KBD_H:		.byte	1
+TPREV_L:		.byte	1
+TPREV_H:		.byte	1
+DELTAT_L:		.byte	1	; \ Time from former course
+DELTAT_H:		.byte	1	; / of the main loop (1 bit = 32 탎)
 
-ENVPHASE2:		.byte 1		; 0=stop 1=attack 2=decay 3=sustain 4=release
-ENV_FRAC_L2:		.byte 1
-ENV_FRAC_H2:		.byte 1
-ENV_INTEGR2:		.byte 1
-VELOCITY_ENVMOD:	.byte 1
+; 0=stop 1=attack 2=decay 3=sustain 4=release
 
-LFOPHASE:		.byte 1		; 0=up 1=down
-LFO_FRAC_L:		.byte 1		; \
-LFO_FRAC_H:		.byte 1		;  > -128,000..+127,999
-LFO_INTEGR:		.byte 1		; /
-LFOVALUE:		.byte 1		; -128..+127
+	.equ	ENV_STOP	= 0
+	.equ	ENV_ATTACK	= 1
+	.equ	ENV_DECAY	= 2
+	.equ	ENV_SUSTAIN	= 3
+	.equ	ENV_RELEASE	= 4
 
-LFO2PHASE:		.byte 1		; 0=up 1=down
-LFO2_FRAC_L:		.byte 1		; \
-LFO2_FRAC_H:		.byte 1		;  > -128,000..+127,999
-LFO2_INTEGR:		.byte 1		; /
-LFO2VALUE:		.byte 1		; -128..+127 (currently not used)
+ENVPHASE:		.byte	1	; 0=stop 1=attack 2=decay 3=sustain 4=release
+ENV_FRAC_L:		.byte	1
+ENV_FRAC_H:		.byte	1
+ENV_INTEGR:		.byte	1
 
-OLDWAVEA:		.byte 1
-OLDWAVEB:		.byte 1
-SHIFTREG_0:		.byte 1		; \
-SHIFTREG_1:		.byte 1		;  > shift register for
-SHIFTREG_2:		.byte 1		; /  pseudo-random generator
-LFOBOTTOM_0:		.byte 1		; \
-LFOBOTTOM_1:		.byte 1		;  > bottom level of LFO
-LFOBOTTOM_2:		.byte 1		; /
-LFOTOP_0:		.byte 1		; \
-LFOTOP_1:		.byte 1		;  > top level of LFO
-LFOTOP_2:		.byte 1		; /
-LFO2BOTTOM_0:		.byte 1		; \
-LFO2BOTTOM_1:		.byte 1		;  > bottom level of LFO2
-LFO2BOTTOM_2:		.byte 1		; /
-LFO2TOP_0:		.byte 1		; \
-LFO2TOP_1:		.byte 1		;  > top level of LFO2
-LFO2TOP_2:		.byte 1		; /
+ENVPHASE2:		.byte	1	; 0=stop 1=attack 2=decay 3=sustain 4=release
+ENV_FRAC_L2:		.byte	1
+ENV_FRAC_H2:		.byte	1
+ENV_INTEGR2:		.byte	1
+VELOCITY_ENVMOD:	.byte	1
 
-DCOA_LEVEL:		.byte 1
-DCOB_LEVEL:		.byte 1
+	.equ	LFOPHASE_RISE	= 0
+	.equ	LFOPHASE_FALL	= 1
 
-KNOB_DEADZONE:		.byte 1		; not used
+LFOPHASE:		.byte	1	; 0=up 1=down
+LFO_FRAC_L:		.byte	1	; \
+LFO_FRAC_H:		.byte	1	;  > -128,000..+127,999
+LFO_INTEGR:		.byte	1	; /
+LFOVALUE:		.byte	1	; -128..+127
+
+LFO2PHASE:		.byte	1	; 0=up 1=down
+LFO2_FRAC_L:		.byte	1	; \
+LFO2_FRAC_H:		.byte	1	;  > -128,000..+127,999
+LFO2_INTEGR:		.byte	1	; /
+LFO2VALUE:		.byte	1	; -128..+127 (currently not used)
+
+OLDWAVEA:		.byte	1
+OLDWAVEB:		.byte	1
+SHIFTREG_0:		.byte	1	; \
+SHIFTREG_1:		.byte	1	;  > shift register for
+SHIFTREG_2:		.byte	1	; /  pseudo-random generator
+LFOBOTTOM_0:		.byte	1	; \
+LFOBOTTOM_1:		.byte	1	;  > bottom level of LFO
+LFOBOTTOM_2:		.byte	1	; /
+LFOTOP_0:		.byte	1	; \
+LFOTOP_1:		.byte	1	;  > top level of LFO
+LFOTOP_2:		.byte	1	; /
+LFO2BOTTOM_0:		.byte	1	; \
+LFO2BOTTOM_1:		.byte	1	;  > bottom level of LFO2
+LFO2BOTTOM_2:		.byte	1	; /
+LFO2TOP_0:		.byte	1	; \
+LFO2TOP_1:		.byte	1	;  > top level of LFO2
+LFO2TOP_2:		.byte	1	; /
+
+DCOA_LEVEL:		.byte	1
+DCOB_LEVEL:		.byte	1
 
 ; increase phase for DCO A
-DELTAA_0:		.byte 1
-DELTAA_1:		.byte 1
-DELTAA_2:		.byte 1
+DELTAA_0:		.byte	1
+DELTAA_1:		.byte	1
+DELTAA_2:		.byte	1
 
 ; increase phase for DCO B
-DELTAB_0:		.byte 1
-DELTAB_1:		.byte 1
-DELTAB_2:		.byte 1
+DELTAB_0:		.byte	1
+DELTAB_1:		.byte	1
+DELTAB_2:		.byte	1
 
 ; Wavetable select
-WAVETABLE_A:		.byte 1		; Bandlimited wavetable 0..11
-WAVETABLE_B:		.byte 1		; Bandlimited wavetable 0..11
+WAVETABLE_A:		.byte	1	; Bandlimited wavetable 0..11
+WAVETABLE_B:		.byte	1	; Bandlimited wavetable 0..11
 
 ; oscillator pulse width
-PULSE_WIDTH:		.byte 1
-PULSE_KNOB_LIMITED:	.byte 1
+PULSE_WIDTH:		.byte	1
+PULSE_KNOB_LIMITED:	.byte	1
 .if USE_ORIGINAL_DCO_FM
 ; fm
-WAVEB:			.byte 1
+WAVEB:			.byte	1
 .if !USE_MIDI_FMDEPTH
-FMDEPTH:		.byte 1
+FMDEPTH:		.byte	1
 .endif	; !USE_MIDI_FMDEPTH
 .endif	; USE_ORIGINAL_DCO_FM
 
 ; eeprom
-WRITE_MODE:		.byte 1		; 0: enable, 255: disable
-WRITE_OFFSET:		.byte 1		; byte 0..15/63 of the patch
-WRITE_PATCH_OFFSET_L:	.byte 1		; start of patch in eeprom
-WRITE_PATCH_OFFSET_H:	.byte 1		; start of patch in eeprom
+WRITE_MODE:		.byte	1	; 0: enable, 255: disable
+WRITE_OFFSET:		.byte	1	; byte 0..15/63 of the patch
+WRITE_PATCH_OFFSET_L:	.byte	1	; start of patch in eeprom
+WRITE_PATCH_OFFSET_H:	.byte	1	; start of patch in eeprom
 
 ; filter
-SCALED_RESONANCE:	.byte 1		; not used
-b_L:			.byte 1
-b_H:			.byte 1
-VCF_STATUS:		.byte 1		; 0 indicates VCF off, 1 = on
+SCALED_RESONANCE:	.byte	1	; not used
+b_L:			.byte	1
+b_H:			.byte	1
+VCF_STATUS:		.byte	1	; 0 indicates VCF off, 1 = on
 
-LFSR_0:			.byte 1		; \
-LFSR_1:			.byte 1		;  > linear feedback shift register for
-LFSR_2:			.byte 1		; /  noise  generator
+LFSR_0:			.byte	1	; \
+LFSR_1:			.byte	1	;  > linear feedback shift register for
+LFSR_2:			.byte	1	; /  noise  generator
+
+.if USE_ARPEGGIATOR
+; arpeggiator
+
+	.equ	ARPSTATE_REST		= 0
+	.equ	ARPSTATE_NOTEON		= 1
+	.equ	ARPSTATE_NOTEOFF	= 2
+
+ARPSTATE:		.byte	1
+ARPPHASE_FRAC_L:	.byte	1
+ARPPHASE_FRAC_H:	.byte	1
+ARPPHASE_INTEGR:	.byte	1
+ARPNOTE:		.byte	1	; midi note buffer index
+
+; midi note array
+NOTES_BUFFER:		.byte	NOTES_BUFFERSIZE
+NOTES_ACTIVE:		.byte	1
+.endif ; USE_ARPEGGIATOR
+
+.if USE_SERIAL_OUT
+UART_TxHead:		.byte	1
+UART_TxTail:		.byte	1
+UART_TxBuf:		.byte	UART_TX_BUFFER_SIZE
+.endif	; USE_SERIAL_OUT
 
 ;----------------------------------------------------------------------------
 ; MIDI Control Change parameter table
@@ -620,7 +712,7 @@ MIDICC:	.byte $80
 	.equ	SUSTAINLEVEL	= MIDICC + $1C	; Slider 7	28 ; 0..255
 	.equ	RELEASETIME	= MIDICC + $1D	; Slider 8	29 ; 0..255
 
-	.equ	SW1		= MIDICC + $2C ; Reserved	44
+	.equ	SW1		= MIDICC + $2C ; Reserved	44	required for load a patch from  eeprom
 	.equ	SW2		= MIDICC + $2D ; Reserved	45
 	.equ	SW3		= MIDICC + $2E ; Reserved	46
 	.equ	SW4		= MIDICC + $2F ; Reserved	47
@@ -635,15 +727,15 @@ MIDICC:	.byte $80
 	.equ	PULSE_KNOB	= MIDICC + $36	; (=LFO2FREQ)	54 ; 0..255
 	.equ	OSC_DETUNE	= MIDICC + $37	;		55 ; -128..+127
 
-  ; Shifted knobs (potentiometer 0 through 7)
+; Shifted knobs (potentiometer 0 through 7)
 ;	.equ	X		= MIDICC + $38	; Undefined	56 ; 0..255
 ;	.equ	X		= MIDICC + $39	; Undefined	57 ; 0..255
 	.equ	KNOB_DCF_DECAY	= MIDICC + $3A	;		58 ; 0..255
 	.equ	KNOB_DCF_ATTACK	= MIDICC + $3B	;		59 ; 0..255
 	.equ	KNOB_AMP_DECAY	= MIDICC + $3C	;		60 ; 0..255
 	.equ	KNOB_AMP_ATTACK	= MIDICC + $3D	;		61 ; 0..255
-;	.equ	X		= MIDICC + $3E	; Undefined	62 ; 0..255
-;	.equ	X		= MIDICC + $3F	; Undefined	63 ; 0..255
+	.equ	ARP_THRESHOLD	= MIDICC + $3E	; 		62 ; 0..255
+	.equ	ARP_RATE	= MIDICC + $3F	; 		63 ; 0..255
 
 ; Panel switches 0..15
 ; midi cc switch messages are not stored here
@@ -668,37 +760,40 @@ MIDICC:	.byte $80
 ; Switches 3
 	.equ	S_MIX_RING	= MIDICC + $50	;		80
 	.equ	S_VELOCITY	= MIDICC + $51	;		81
-	.equ	S_USER_3_2	= MIDICC + $52	;		82
-	.equ	S_TRANSPOSE	= MIDICC + $53	;		83
-	.equ	S_DCA_MODE	= MIDICC + $54	;		84
-	.equ	S_MODWHEEL_ENABLE= MIDICC + $55	;		85
+	.equ	S_DCA_MODE	= MIDICC + $52	;		84
+	.equ	S_DCA_OPEN	= MIDICC + $53	;		82
+	.equ	S_TRANSPOSE	= MIDICC + $54	;		83
+	.equ	S_MODWHEEL_ENA	= MIDICC + $55	;		85
 	.equ	S_LFO_KBD_SYNC	= MIDICC + $56	;		86
 	.equ	S_DCF_KBD_TRACK	= MIDICC + $57	;		87
 ; Switches 4
 	.equ	S_USER_4_0	= MIDICC + $58	;		88
 	.equ	S_USER_4_1	= MIDICC + $59	;		89
-	.equ	S_USER_4_2	= MIDICC + $5A	;		90
-	.equ	S_USER_4_3	= MIDICC + $5B	;		91
+	.equ	S_ARP_ENABLE	= MIDICC + $5A	;		90
+	.equ	S_ARP_REPEAT	= MIDICC + $5B	;		91
 	.equ	S_USER_4_4	= MIDICC + $5C	;		92
 	.equ	S_USER_4_5	= MIDICC + $5D	;		93
 	.equ	S_LFO2_WAVE	= MIDICC + $5E	;		94
 	.equ	S_LFO2_RANDOM	= MIDICC + $5F	;		95
 
 ; Patch save/load and MIDI channel set
-LED_STATUS:		.byte 1		; off/on status of front panel LED
-LED_TIMER:		.byte 1		; number of blinks before reset
-BUTTON_STATUS:		.byte 1		; MIDI=1, SAVE=3, LOAD=7, CLEAR=0
-CONTROL_SWITCH:		.byte 1		; Last panel switch moved: 1..16, where zero indicates no movement.
+LED_STATUS:		.byte	1		; off/on status of front panel LED
+LED_TIMER:		.byte	1		; number of blinks before reset
+BUTTON_STATUS:		.byte	1		; MIDI=1, SAVE=3, LOAD=7, CLEAR=0
+CONTROL_SWITCH:		.byte	1		; Last panel switch moved: 1..16, where zero indicates no movement.
+CONTROL_STATE:		.byte	1
+	.equ	ENABLE_MIDI_CC_OUT	= 0
+	.equ	ENABLE_DEBUG_OUT	= 1
 
-MIDI_TASK_UPDATE:	.byte 1
+MIDI_TASK_UPDATE:	.byte	1
 
 	.equ	UPDATE_ENV_DCF	= 0
 	.equ	UPDATE_ENV_DCA	= 1
 	.equ	UPDATE_VOLUME	= 2
 
 .if USE_MASTER_VOLUME
-VOLUME:			.byte 1
-VOLUME_X4:		.byte 1
+VOLUME:			.byte	1
+VOLUME_X4:		.byte	1
 .endif	; USE_MASTER_VOLUME
 
 ;----------------------------------------------------------------------------
@@ -712,11 +807,11 @@ VOLUME_X4:		.byte 1
 	; Unshifted knobs (potentiometer 0 through 7)
 	.db	0x00	; RESONANCE		; $00 -> $30
 	.db	0xFE	; CUTOFF		; $01 -> $31
-	.db	0xC0	; LFOFREQ		; $02 -> $32
-	.db	0x00	; PANEL_LFOLEVEL	; $03 -> $33
+	.db	0x50	; LFOFREQ		; $02 -> $32
+	.db	0x80	; PANEL_LFOLEVEL	; $03 -> $33
 	.db	0x80	; VCFENVMOD		; $04 -> $34
 	.db	0x00	; PORTAMENTO		; $05 -> $35
-	.db	0xC0	; PULSE_KNOB		; $06 -> $36	; (=LFO2FREQ)
+	.db	0x50	; PULSE_KNOB		; $06 -> $36	; (=LFO2FREQ)
 	.db	0x80	; OSC_DETUNE		; $07 -> $37
 
 	; Shifted knobs (potentiometer 0 through 7)
@@ -729,56 +824,56 @@ VOLUME_X4:		.byte 1
 	.db	0	; X			; $0E -> $3E ; Undefined
 	.db	0	; X			; $0F -> $3F ; Undefined
 
-	.db	0xC0	; LFO2FREQ		; $10 -> $0E	; Knob 1	14
+	.db	0x50	; LFO2FREQ		; $10 -> $0E	; Knob 1	14
 	.db	0x80	; PWMDEPTH		; $11 -> $0F	; Knob 2	15 ; (=LFO2LEVEL)
-	.db	0x00	; FMDEPTH		; $12 -> $10	; Knob 3	16
-	.db	0	; MIDI_KNOB_4		; $13 -> $11	; Knob 4	17 ; currently not used
-	.db	0	; MIDI_KNOB_5		; $14 -> $12	; Knob 5	18 ; currently not used
-	.db	0	; MIDI_KNOB_6		; $15 -> $13	; Knob 6	19 ; currently not used
+	.db	0x80	; FMDEPTH		; $12 -> $10	; Knob 3	16
+	.db	0x80	; MIDI_KNOB_4		; $13 -> $11	; Knob 4	17 ; currently not used
+	.db	0x80	; MIDI_KNOB_5		; $14 -> $12	; Knob 5	18 ; currently not used
+	.db	0x80	; MIDI_KNOB_6		; $15 -> $13	; Knob 6	19 ; currently not used
 	.db	0x80	; MIXER_BALANCE		; $16 -> $14	; Knob 7	20
 	.db	0x80	; MASTER_VOLUME		; $17 -> $15	; Knob 8	21
 
 	.db	0x00	; ATTACKTIME2		; $18 -> $16	; Slider 1	22 ; DCF envelope
-	.db	0x00	; DECAYTIME2		; $19 -> $17	; Slider 2	23
+	.db	0xFE	; DECAYTIME2		; $19 -> $17	; Slider 2	23
 	.db	0xFE	; SUSTAINLEVEL2		; $1A -> $18	; Slider 3	24
-	.db	0x00	; RELEASETIME2		; $1B -> $19	; Slider 4	25
+	.db	0xA0	; RELEASETIME2		; $1B -> $19	; Slider 4	25
 	.db	0x00	; ATTACKTIME		; $1C -> $1A	; Slider 5	26 ; DCA envelope
-	.db	0x00	; DECAYTIME		; $1D -> $1B	; Slider 6	27
+	.db	0xFE	; DECAYTIME		; $1D -> $1B	; Slider 6	27
 	.db	0xFE	; SUSTAINLEVEL		; $1E -> $1C	; Slider 7	28
-	.db	0x00	; RELEASETIME		; $1F -> $1D	; Slider 8	29
+	.db	0xA0	; RELEASETIME		; $1F -> $1D	; Slider 8	29
 
 	.db	0x00	; SW1 -> PATCH_SWITCH1	; $20 -> $2C
 			;	SW_KNOB_SHIFT	= 0	; 0=lower, 1=upper
-			;	SW_OSC_FM	= 1	;
+			;	SW_OSC_FM	= 1	; 0=off, 1=on
 			;	SW_LFO_RANDOM	= 2	; 0=norm, 1=rand
 			;	SW_LFO_WAVE	= 3	; 0=tri, 1=squ
 			;	SW_FILTER_MODE	= 4	; 0=lp, 1=hp
 			;	SW_DISTORTION	= 5	; 0=off, 1=on
-			;	SW_LFO_ENABLE	= 6	;
+			;	SW_LFO_ENABLE	= 6	; 0=off, 1=on
 			;	SW_LFO_DEST	= 7	; 0=DCF, 1=DCO
-	.db	0x99	; SW2 -> PATCH_SWITCH2	; $21 -> $2D
-			;	SW_ANTI_ALIAS	= 0 x	;
+	.db	0x15	; SW2 -> PATCH_SWITCH2	; $21 -> $2D
+			;	SW_ANTI_ALIAS	= 0 x	; 0=off, 1=on
 			;	SW_OSCB_OCT	= 1	; 0=down, 1=up
-			;	SW_OSCB_ENABLE	= 2	; 0=off, 1=on
-			;	SW_OSCB_WAVE	= 3 x	; 0=saw, 1=squ
-			;	SW_SUSTAIN	= 4 x	;
+			;	SW_OSCB_ENABLE	= 2 x	; 0=off, 1=on
+			;	SW_OSCB_WAVE	= 3 	; 0=saw, 1=squ
+			;	SW_SUSTAIN	= 4 x	; 0=ADR, 1=ASR
 			;	SW_OSCA_NOISE	= 5	; 0=off, 1=on
 			;	SW_PWM_SWEEP	= 6	; 0=off, 1=LFO2
-			;	SW_OSCA_WAVE	= 7 x	; 0=saw, 1=squ
-	.db	0xF8	; SW3 -> PATCH_SWITCH3	; $22 -> $2E
+			;	SW_OSCA_WAVE	= 7 	; 0=saw, 1=squ
+	.db	0xF4	; SW3 -> PATCH_SWITCH3	; $22 -> $2E
 			;	SW_MIX_RING	= 0	; 0=Mixer(default), 1=Ringmodulator
-			;	SW_VELOCITY	= 1	;
-			;	SW_USER_3_2	= 2	;
-			;	SW_TRANSPOSE	= 3 x	; 0=down, 1=up (default)
-			;	SW_DCA_MODE	= 4 x	; 0=gate, 1=env (default)
+			;	SW_VELOCITY	= 1	; 0=off, 1=on
+			;	SW_DCA_MODE	= 2 x	; 0=gate, 1=env (default)
+			;	SW_DCA_OPEN	= 3	; 0=norm, 1=open
+			;	SW_TRANSPOSE	= 4 x	; 0=down, 1=up (default)
 			;	SW_MODWHEEL_ENA	= 5 x	; 0=diable, 1=enable (default)
 			;	SW_LFO_KBD_SYNC	= 6 x	; 0=off, 1=on (default)
 			;	SW_DCF_KBD_TRACK= 7 x	; 0=off, 1=on (default)
 	.db	0x00	; SW4 -> PATCH_SWITCH4	; $23 -> $2F
 			;	SW_USER_4_0	= 0	;
 			;	SW_USER_4_1	= 1	;
-			;	SW_USER_4_2	= 2	;
-			;	SW_USER_4_3	= 3	;
+			;	SW_ARP_ENABLE	= 2	;
+			;	SW_ARP_REPEAT	= 3	;
 			;	SW_USER_4_4	= 4	;
 			;	SW_USER_4_5	= 5	;
 			;	SW_LFO2_WAVE	= 6	; 0=tri, 1=squ
@@ -829,36 +924,36 @@ VOLUME_X4:		.byte 1
 
 	.db	0x00	; SW1 -> PATCH_SWITCH1	; $20 -> $2C
 			;	SW_KNOB_SHIFT	= 0	; 0=lower, 1=upper
-			;	SW_OSC_FM	= 1	;
+			;	SW_OSC_FM	= 1	; 0=off, 1=on
 			;	SW_LFO_RANDOM	= 2	; 0=norm, 1=rand
 			;	SW_LFO_WAVE	= 3	; 0=tri, 1=squ
 			;	SW_FILTER_MODE	= 4	; 0=lp, 1=hp
 			;	SW_DISTORTION	= 5	; 0=off, 1=on
-			;	SW_LFO_ENABLE	= 6	;
+			;	SW_LFO_ENABLE	= 6	; 0=off, 1=on
 			;	SW_LFO_DEST	= 7	; 0=DCF, 1=DCO
 	.db	0x99	; SW2 -> PATCH_SWITCH2	; $21 -> $2D
-			;	SW_ANTI_ALIAS	= 0 x	;
+			;	SW_ANTI_ALIAS	= 0 x	; 0=off, 1=on
 			;	SW_OSCB_OCT	= 1	; 0=down, 1=up
 			;	SW_OSCB_ENABLE	= 2	; 0=off, 1=on
 			;	SW_OSCB_WAVE	= 3 x	; 0=saw, 1=squ
-			;	SW_SUSTAIN	= 4 x	;
+			;	SW_SUSTAIN	= 4 x	; 0=ADR, 1=ASR
 			;	SW_OSCA_NOISE	= 5	; 0=off, 1=on
 			;	SW_PWM_SWEEP	= 6	; 0=off, 1=LFO2
 			;	SW_OSCA_WAVE	= 7 x	; 0=saw, 1=squ
-	.db	0xF8	; SW3 -> PATCH_SWITCH3	; $22 -> $2E
+	.db	0xF4	; SW3 -> PATCH_SWITCH3	; $22 -> $2E
 			;	SW_MIX_RING	= 0	; 0=Mixer(default), 1=Ringmodulator
-			;	SW_VELOCITY	= 1	;
-			;	SW_USER_3_2	= 2	;
-			;	SW_TRANSPOSE	= 3 x	; 0=down, 1=up (default)
-			;	SW_DCA_MODE	= 4 x	; 0=gate, 1=env (default)
+			;	SW_VELOCITY	= 1	; 0=off, 1=on
+			;	SW_DCA_MODE	= 2 x	; 0=gate, 1=env (default)
+			;	SW_DCA_OPEN	= 3	; 0=norm, 1=open
+			;	SW_TRANSPOSE	= 4 x	; 0=down, 1=up (default)
 			;	SW_MODWHEEL_ENA	= 5 x	; 0=diable, 1=enable (default)
 			;	SW_LFO_KBD_SYNC	= 6 x	; 0=off, 1=on (default)
 			;	SW_DCF_KBD_TRACK= 7 x	; 0=off, 1=on (default)
 	.db	0x00	; SW4 -> PATCH_SWITCH4	; $23 -> $2F
 			;	SW_USER_4_0	= 0	;
 			;	SW_USER_4_1	= 1	;
-			;	SW_USER_4_2	= 2	;
-			;	SW_USER_4_3	= 3	;
+			;	SW_ARP_ENABLE	= 2	;
+			;	SW_ARP_REPEAT	= 3	;
 			;	SW_USER_4_4	= 4	;
 			;	SW_USER_4_5	= 5	;
 			;	SW_LFO2_WAVE	= 6	; 0=tri, 1=squ
@@ -908,92 +1003,173 @@ VOLUME_X4:		.byte 1
 
 	.db	0x00	; SW1 -> PATCH_SWITCH1	; $20 -> $2C
 			;	SW_KNOB_SHIFT	= 0	; 0=lower, 1=upper
-			;	SW_OSC_FM	= 1	;
+			;	SW_OSC_FM	= 1	; 0=off, 1=on
 			;	SW_LFO_RANDOM	= 2	; 0=norm, 1=rand
 			;	SW_LFO_WAVE	= 3	; 0=tri, 1=squ
 			;	SW_FILTER_MODE	= 4	; 0=lp, 1=hp
 			;	SW_DISTORTION	= 5	; 0=off, 1=on
-			;	SW_LFO_ENABLE	= 6	;
+			;	SW_LFO_ENABLE	= 6	; 0=off, 1=on
 			;	SW_LFO_DEST	= 7	; 0=DCF, 1=DCO
 	.db	0x8F	; SW2 -> PATCH_SWITCH2	; $21 -> $2D
-			;	SW_ANTI_ALIAS	= 0 x	;
+			;	SW_ANTI_ALIAS	= 0 x	; 0=off, 1=on
 			;	SW_OSCB_OCT	= 1 x	; 0=down, 1=up
 			;	SW_OSCB_ENABLE	= 2 x	; 0=off, 1=on
 			;	SW_OSCB_WAVE	= 3 x	; 0=saw, 1=squ
-			;	SW_SUSTAIN	= 4	;
+			;	SW_SUSTAIN	= 4	; 0=ADR, 1=ASR
 			;	SW_OSCA_NOISE	= 5	; 0=off, 1=on
 			;	SW_PWM_SWEEP	= 6	; 0=off, 1=LFO2
 			;	SW_OSCA_WAVE	= 7 x	; 0=saw, 1=squ
-	.db	0xF8	; SW3 -> PATCH_SWITCH3	; $22 -> $2E
+	.db	0xF4	; SW3 -> PATCH_SWITCH3	; $22 -> $2E
 			;	SW_MIX_RING	= 0	; 0=Mixer(default), 1=Ringmodulator
-			;	SW_VELOCITY	= 1	;
-			;	SW_USER_3_2	= 2	;
-			;	SW_TRANSPOSE	= 3 x	; 0=down, 1=up (default)
-			;	SW_DCA_MODE	= 4 x	; 0=gate, 1=env (default)
+			;	SW_VELOCITY	= 1	; 0=off, 1=on
+			;	SW_DCA_MODE	= 2 x	; 0=gate, 1=env (default)
+			;	SW_DCA_OPEN	= 3	; 0=norm, 1=open
+			;	SW_TRANSPOSE	= 4 x	; 0=down, 1=up (default)
 			;	SW_MODWHEEL_ENA	= 5 x	; 0=diable, 1=enable (default)
 			;	SW_LFO_KBD_SYNC	= 6 x	; 0=off, 1=on (default)
 			;	SW_DCF_KBD_TRACK= 7 x	; 0=off, 1=on (default)
 	.db	0x00	; SW4 -> PATCH_SWITCH4	; $23 -> $2F
 			;	SW_USER_4_0	= 0	;
 			;	SW_USER_4_1	= 1	;
-			;	SW_USER_4_2	= 2	;
-			;	SW_USER_4_3	= 3	;
+			;	SW_ARP_ENABLE	= 2	;
+			;	SW_ARP_REPEAT	= 3	;
 			;	SW_USER_4_4	= 4	;
 			;	SW_USER_4_5	= 5	;
 			;	SW_LFO2_WAVE	= 6	; 0=tri, 1=squ
 			;	SW_LFO2_RANDOM	= 7	; 0=norm, 1=rand
 
+.if FILL_UP_WITH_DEFAULT_PATCH
 ;-------------------------
 ; 4th patch
 	.org	0x90	; 4th patch
+
+	.db	0x00, 0xFE, 0x50, 0x80, 0x80, 0x00, 0x50, 0x80
+	.db	0,    0,    0xA0, 0x00, 0xA0, 0x00, 0,    0
+	.db	0x50, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
+	.db	0x00, 0xFE, 0xFE, 0xA0, 0x00, 0xFE, 0xFE, 0xA0
+	.db	0x00, 0x15, 0xF4, 0x00
 
 ;-------------------------
 ; 5th patch
 	.org	0xC0	; 5th patch
 
+	.db	0x00, 0xFE, 0x50, 0x80, 0x80, 0x00, 0x50, 0x80
+	.db	0,    0,    0xA0, 0x00, 0xA0, 0x00, 0,    0
+	.db	0x50, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
+	.db	0x00, 0xFE, 0xFE, 0xA0, 0x00, 0xFE, 0xFE, 0xA0
+	.db	0x00, 0x15, 0xF4, 0x00
+
 ;-------------------------
 ; 6th patch
 	.org	0xF0	; 6th patch
+
+	.db	0x00, 0xFE, 0x50, 0x80, 0x80, 0x00, 0x50, 0x80
+	.db	0,    0,    0xA0, 0x00, 0xA0, 0x00, 0,    0
+	.db	0x50, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
+	.db	0x00, 0xFE, 0xFE, 0xA0, 0x00, 0xFE, 0xFE, 0xA0
+	.db	0x00, 0x15, 0xF4, 0x00
 
 ;-------------------------
 ; 7th patch
 	.org	0x120	; 7th patch
 
+	.db	0x00, 0xFE, 0x50, 0x80, 0x80, 0x00, 0x50, 0x80
+	.db	0,    0,    0xA0, 0x00, 0xA0, 0x00, 0,    0
+	.db	0x50, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
+	.db	0x00, 0xFE, 0xFE, 0xA0, 0x00, 0xFE, 0xFE, 0xA0
+	.db	0x00, 0x15, 0xF4, 0x00
+
 ;-------------------------
 ; 8th patch
 	.org	0x150	; 8th patch
+
+	.db	0x00, 0xFE, 0x50, 0x80, 0x80, 0x00, 0x50, 0x80
+	.db	0,    0,    0xA0, 0x00, 0xA0, 0x00, 0,    0
+	.db	0x50, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
+	.db	0x00, 0xFE, 0xFE, 0xA0, 0x00, 0xFE, 0xFE, 0xA0
+	.db	0x00, 0x15, 0xF4, 0x00
 
 ;-------------------------
 ; 9th patch
 	.org	0x180	; 9th patch
 
+	.db	0x00, 0xFE, 0x50, 0x80, 0x80, 0x00, 0x50, 0x80
+	.db	0,    0,    0xA0, 0x00, 0xA0, 0x00, 0,    0
+	.db	0x50, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
+	.db	0x00, 0xFE, 0xFE, 0xA0, 0x00, 0xFE, 0xFE, 0xA0
+	.db	0x00, 0x15, 0xF4, 0x00
+
 ;-------------------------
 ; 10th patch
 	.org	0x1B0	; 10th patch
+
+	.db	0x00, 0xFE, 0x50, 0x80, 0x80, 0x00, 0x50, 0x80
+	.db	0,    0,    0xA0, 0x00, 0xA0, 0x00, 0,    0
+	.db	0x50, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
+	.db	0x00, 0xFE, 0xFE, 0xA0, 0x00, 0xFE, 0xFE, 0xA0
+	.db	0x00, 0x15, 0xF4, 0x00
 
 ;-------------------------
 ; 11th patch
 	.org	0x1E0	; 11th patch
 
+	.db	0x00, 0xFE, 0x50, 0x80, 0x80, 0x00, 0x50, 0x80
+	.db	0,    0,    0xA0, 0x00, 0xA0, 0x00, 0,    0
+	.db	0x50, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
+	.db	0x00, 0xFE, 0xFE, 0xA0, 0x00, 0xFE, 0xFE, 0xA0
+	.db	0x00, 0x15, 0xF4, 0x00
+
 ;-------------------------
 ; 12th patch
 	.org	0x210	; 12th patch
+
+	.db	0x00, 0xFE, 0x50, 0x80, 0x80, 0x00, 0x50, 0x80
+	.db	0,    0,    0xA0, 0x00, 0xA0, 0x00, 0,    0
+	.db	0x50, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
+	.db	0x00, 0xFE, 0xFE, 0xA0, 0x00, 0xFE, 0xFE, 0xA0
+	.db	0x00, 0x15, 0xF4, 0x00
 
 ;-------------------------
 ; 13th patch
 	.org	0x240	; 13th patch
 
+	.db	0x00, 0xFE, 0x50, 0x80, 0x80, 0x00, 0x50, 0x80
+	.db	0,    0,    0xA0, 0x00, 0xA0, 0x00, 0,    0
+	.db	0x50, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
+	.db	0x00, 0xFE, 0xFE, 0xA0, 0x00, 0xFE, 0xFE, 0xA0
+	.db	0x00, 0x15, 0xF4, 0x00
+
 ;-------------------------
 ; 14th patch
 	.org	0x270	; 14th patch
+
+	.db	0x00, 0xFE, 0x50, 0x80, 0x80, 0x00, 0x50, 0x80
+	.db	0,    0,    0xA0, 0x00, 0xA0, 0x00, 0,    0
+	.db	0x50, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
+	.db	0x00, 0xFE, 0xFE, 0xA0, 0x00, 0xFE, 0xFE, 0xA0
+	.db	0x00, 0x15, 0xF4, 0x00
 
 ;-------------------------
 ; 15th patch
 	.org	0x2A0	; 15th patch
 
+	.db	0x00, 0xFE, 0x50, 0x80, 0x80, 0x00, 0x50, 0x80
+	.db	0,    0,    0xA0, 0x00, 0xA0, 0x00, 0,    0
+	.db	0x50, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
+	.db	0x00, 0xFE, 0xFE, 0xA0, 0x00, 0xFE, 0xFE, 0xA0
+	.db	0x00, 0x15, 0xF4, 0x00
+
 ;-------------------------
 ; 16th patch
 	.org	0x2D0	; 16th patch
+
+	.db	0x00, 0xFE, 0x50, 0x80, 0x80, 0x00, 0x50, 0x80
+	.db	0,    0,    0xA0, 0x00, 0xA0, 0x00, 0,    0
+	.db	0x50, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80
+	.db	0x00, 0xFE, 0xFE, 0xA0, 0x00, 0xFE, 0xFE, 0xA0
+	.db	0x00, 0x15, 0xF4, 0x00
+.endif
+;-------------------------
 
 	.org	0x3fe
 	.db	0	; current patch
@@ -1024,7 +1200,11 @@ VOLUME_X4:		.byte 1
 	jmp	IRQ_NONE	; SPI, STC
 
 	jmp	UART_RXC	; UART, RX COMPLETE
+.if USE_SERIAL_OUT
+	jmp	UART_UDRE	; UART, UDRE
+.else	; USE_SERIAL_OUT
 	jmp	IRQ_NONE	; UART, UDRE
+.endif	; USE_SERIAL_OUT
 	jmp	IRQ_NONE	; UART, TX COMPLETE
 
 	jmp	IRQ_NONE	; ADC CONVERSION COMPLETE
@@ -1129,44 +1309,470 @@ TAB_VCF:
 ;  update values for 32us update rate
 ;  LFO_INTEGR overflows all 256*32us = 8.192 ms
 ;
+.if !USE_TIMETORATE_64 && !USE_TIMETORATE_128
 ; formula  Tof = 256*32us*2^16/N
 ;          LFOfreq = 1/Tof
 
 ; Rate value =	Rmin * Q^i with Q = (Rmax/Rmin)^(1/31) = 1,286111766
 
 TIMETORATE:
-	.dw	50957		; 10.54 mS	fast lfo, attack/rise time
-	.dw	39621		; 13.55 mS
-	.dw	30807		; 17.43 mS
-	.dw	23953		; 22.41 mS
-	.dw	18625		; 28.83 mS
-	.dw	14481		; 37.07 mS
-	.dw	11260		; 47.68 mS
-	.dw	 8755		; 61.32 mS
-	.dw	 6807		; 78.87 mS
-	.dw	 5293		; 101.4 mS
-	.dw	 4115		; 130.5 mS
-	.dw	 3200		; 167.8 mS
-	.dw	 2488		; 215.8 mS
-	.dw	 1935		; 277.5 mS
-	.dw	 1504		; 356.9 mS
-	.dw	 1170		; 459.0 mS
-	.dw	  909		; 590.4 mS
-	.dw	  707		; 759.3 mS
-	.dw	  550		; 976.5 mS
-	.dw	  427		; 1.256 S
-	.dw	  332		; 1.615 S
-	.dw	  258		; 2.077 S
-	.dw	  201		; 2.672 S
-	.dw	  156		; 3.436 S
-	.dw	  121		; 4.419 S
-	.dw	   94		; 5.684 S
-	.dw	   73		; 7.310 S
-	.dw	   57		; 9.401 S
-	.dw	   44		; 12.09 S
-	.dw	   35		; 15.55 S
-	.dw	   27		; 20.00 S
-	.dw	   19		; 28.26 S	slow lfo, attack/rise time
+	;	value		  index	 time
+	;	65535		  -	 8,192 ms
+	.dw	50957		;  0:	10.54 mS	fast lfo, attack/rise time
+	.dw	39621		;  1:	13.55 mS
+	.dw	30807		;  2:	17.43 mS
+	.dw	23953		;  3:	22.41 mS
+	.dw	18625		;  4:	28.83 mS
+	.dw	14481		;  5:	37.07 mS
+	.dw	11260		;  6:	47.68 mS
+	.dw	 8755		;  7:	61.32 mS
+	.dw	 6807		;  8:	78.87 mS
+	.dw	 5293		;  9:	101.4 mS
+	.dw	 4115		; 10:	130.5 mS
+	.dw	 3200		; 11:	167.8 mS
+	.dw	 2488		; 12:	215.8 mS
+	.dw	 1935		; 13:	277.5 mS
+	.dw	 1504		; 14:	356.9 mS
+	.dw	 1170		; 15:	459.0 mS
+	.dw	  909		; 16:	590.4 mS
+	.dw	  707		; 17:	759.3 mS
+	.dw	  550		; 18:	976.5 mS
+	.dw	  427		; 19:	1.256 S
+	.dw	  332		; 20:	1.615 S
+	.dw	  258		; 21:	2.077 S
+	.dw	  201		; 22:	2.672 S
+	.dw	  156		; 23:	3.436 S
+	.dw	  121		; 24:	4.419 S
+	.dw	   94		; 25:	5.684 S
+	.dw	   73		; 26:	7.310 S
+	.dw	   57		; 27:	9.401 S
+	.dw	   44		; 28:	12.09 S
+	.dw	   35		; 29:	15.55 S
+	.dw	   27		; 20:	20.00 S
+	.dw	   19		; 31:	28.26 S	slow lfo, attack/rise time
+
+.else	; !USE_TIMETORATE_64 && !USE_TIMETORATE_128
+
+
+ .if !USE_TIMETORATE_128
+; formula  Tof = 256*32us*2^16/N
+;          LFOfreq = 1/Tof
+
+; Rate value =	Rmin * Q^i with Q = (Rmax/Rmin)^(1/63) =
+
+TIMETORATE:
+	;	value		  index	 time
+	;	65535		  -	  8,192 ms
+	.dw	57903		;  0	  9,272 ms	fast lfo, attack/rise time
+	.dw	51160		;  1	 10,494 ms
+	.dw	45202		;  2	 11,877 ms
+	.dw	39938		;  3	 13,442 ms
+	.dw	35287		;  4	 15,214 ms
+	.dw	31177		;  5	 17,220 ms
+	.dw	27547		;  6	 19,489 ms
+	.dw	24339		;  7	 22,058 ms
+	.dw	21504		;  8	 24,965 ms
+	.dw	19000		;  9	 28,256 ms
+	.dw	16787		; 10	 31,980 ms
+	.dw	14832		; 11	 36,196 ms
+	.dw	13105		; 12	 40,966 ms
+	.dw	11579		; 13	 46,366 ms
+	.dw	10230		; 14	 52,477 ms
+	.dw	 9039		; 15	 59,394 ms
+	.dw	 7986		; 16	 67,223 ms
+	.dw	 7056		; 17	 76,083 ms
+	.dw	 6235		; 18	 86,111 ms
+	.dw	 5508		; 19	 97,461 ms
+	.dw	 4867		; 20	110,307 ms
+	.dw	 4300		; 21	124,846 ms
+	.dw	 3799		; 22	141,302 ms
+	.dw	 3357		; 23	159,926 ms
+	.dw	 2966		; 24	181,005 ms
+	.dw	 2621		; 25	204,863 ms
+	.dw	 2315		; 26	231,865 ms
+	.dw	 2046		; 27	262,427 ms
+	.dw	 1808		; 28	297,016 ms
+	.dw	 1597		; 29	336,165 ms
+	.dw	 1411		; 30	380,473 ms
+	.dw	 1247		; 31	430,622 ms
+	.dw	 1102		; 32	487,380 ms
+	.dw	  973		; 33	551,620 ms
+	.dw	  860		; 34	624,327 ms
+	.dw	  760		; 35	706,617 ms
+	.dw	  671		; 36	799,754 ms
+	.dw	  593		; 37	905,166 ms
+	.dw	  524		; 38	 1,02 s
+	.dw	  463		; 39	 1,15 s
+	.dw	  409		; 40	 1,31 s
+	.dw	  361		; 41	 1,48 s
+	.dw	  319		; 42	 1,68 s
+	.dw	  282		; 43	 1,90 s
+	.dw	  249		; 44	 2,15 s
+	.dw	  220		; 45	 2,43 s
+	.dw	  195		; 46	 2,75 s
+	.dw	  172		; 47	 3,12 s
+	.dw	  152		; 48	 3,53 s
+	.dw	  134		; 49	 3,99 s
+	.dw	  119		; 50	 4,52 s
+	.dw	  105		; 51	 5,12 s
+	.dw	   93		; 52	 5,79 s
+	.dw	   82		; 53	 6,56 s
+	.dw	   72		; 54	 7,42 s
+	.dw	   64		; 55	 8,40 s
+	.dw	   56		; 56	 9,51 s
+	.dw	   50		; 57	10,76 s
+	.dw	   44		; 58	12,18 s
+	.dw	   39		; 59	13,79 s
+	.dw	   34		; 60	15,61 s
+	.dw	   30		; 61	17,67 s
+	.dw	   27		; 62	20,00 s
+	.dw	   24		; 63	22,63 s		slow lfo, attack/rise time
+
+.else	; !USE_TIMETORATE_128
+
+TIMETORATE:
+	;	value		  index	 time
+	.dw	50936		; 0	   10,540
+	.dw	47997		; 1	   11,185
+	.dw	45227		; 2	   11,870
+	.dw	42617		; 3	   12,597
+	.dw	40158		; 4	   13,369
+	.dw	37841		; 5	   14,187
+	.dw	35657		; 6	   15,056
+	.dw	33600		; 7	   15,978
+	.dw	31661		; 8	   16,957
+	.dw	29834		; 9	   17,995
+	.dw	28112		; 10	   19,097
+	.dw	26490		; 11	   20,266
+	.dw	24962		; 12	   21,508
+	.dw	23521		; 13	   22,825
+	.dw	22164		; 14	   24,222
+	.dw	20885		; 15	   25,706
+	.dw	19680		; 16	   27,280
+	.dw	18544		; 17	   28,950
+	.dw	17474		; 18	   30,723
+	.dw	16466		; 19	   32,605
+	.dw	15516		; 20	   34,601
+	.dw	14620		; 21	   36,720
+	.dw	13777		; 22	   38,969
+	.dw	12982		; 23	   41,355
+	.dw	12233		; 24	   43,888
+	.dw	11527		; 25	   46,575
+	.dw	10862		; 26	   49,427
+	.dw	10235		; 27	   52,454
+	.dw	 9644		; 28	   55,666
+	.dw	 9088		; 29	   59,075
+	.dw	 8563		; 30	   62,693
+	.dw	 8069		; 31	   66,532
+	.dw	 7604		; 32	   70,606
+	.dw	 7165		; 33	   74,930
+	.dw	 6751		; 34	   79,518
+	.dw	 6362		; 35	   84,388
+	.dw	 5995		; 36	   89,555
+	.dw	 5649		; 37	   95,039
+	.dw	 5323		; 38	  100,859
+	.dw	 5016		; 39	  107,036
+	.dw	 4726		; 40	  113,590
+	.dw	 4454		; 41	  120,546
+	.dw	 4197		; 42	  127,928
+	.dw	 3954		; 43	  135,762
+	.dw	 3726		; 44	  144,076
+	.dw	 3511		; 45	  152,899
+	.dw	 3309		; 46	  162,262
+	.dw	 3118		; 47	  172,198
+	.dw	 2938		; 48	  182,743
+	.dw	 2768		; 49	  193,934
+	.dw	 2609		; 50	  205,810
+	.dw	 2458		; 51	  218,413
+	.dw	 2316		; 52	  231,788
+	.dw	 2183		; 53	  245,982
+	.dw	 2057		; 54	  261,046
+	.dw	 1938		; 55	  277,031
+	.dw	 1826		; 56	  293,996
+	.dw	 1721		; 57	  312,000
+	.dw	 1621		; 58	  331,106
+	.dw	 1528		; 59	  351,382
+	.dw	 1440		; 60	  372,899
+	.dw	 1357		; 61	  395,735
+	.dw	 1278		; 62	  419,968
+	.dw	 1205		; 63	  445,686
+	.dw	 1135		; 64	  472,979
+	.dw	 1070		; 65	  501,943
+	.dw	 1008		; 66	  532,680
+	.dw	  950		; 67	  565,300
+	.dw	  895		; 68	  599,918
+	.dw	  843		; 69	  636,655
+	.dw	  795		; 70	  675,642
+	.dw	  749		; 71	  717,017
+	.dw	  706		; 72	  760,925
+	.dw	  665		; 73	  807,522
+	.dw	  626		; 74	  856,972
+	.dw	  590		; 75	  909,451
+	.dw	  556		; 76	  965,143
+	.dw	  524		; 77	 1024,246
+	.dw	  494		; 78	 1086,968
+	.dw	  465		; 79	 1153,531
+	.dw	  439		; 80	 1224,170
+	.dw	  413		; 81	 1299,135
+	.dw	  389		; 82	 1378,691
+	.dw	  367		; 83	 1463,118
+	.dw	  346		; 84	 1552,715
+	.dw	  326		; 85	 1647,800
+	.dw	  307		; 86	 1748,706
+	.dw	  289		; 87	 1855,792
+	.dw	  273		; 88	 1969,436
+	.dw	  257		; 89	 2090,039
+	.dw	  242		; 90	 2218,028
+	.dw	  228		; 91	 2353,854
+	.dw	  215		; 92	 2497,997
+	.dw	  203		; 93	 2650,968
+	.dw	  191		; 94	 2813,306
+	.dw	  180		; 95	 2985,586
+	.dw	  169		; 96	 3168,415
+	.dw	  160		; 97	 3362,440
+	.dw	  150		; 98	 3568,347
+	.dw	  142		; 99	 3786,863
+	.dw	  134		; 100	 4018,760
+	.dw	  126		; 101	 4264,858
+	.dw	  119		; 102	 4526,027
+	.dw	  112		; 103	 4803,189
+	.dw	  105		; 104	 5097,323
+	.dw	   99		; 105	 5409,469
+	.dw	   94		; 106	 5740,731
+	.dw	   88		; 107	 6092,278
+	.dw	   83		; 108	 6465,353
+	.dw	   78		; 109	 6861,273
+	.dw	   74		; 110	 7281,439
+	.dw	   69		; 111	 7727,335
+	.dw	   65		; 112	 8200,537
+	.dw	   62		; 113	 8702,716
+	.dw	   58		; 114	 9235,647
+	.dw	   55		; 115	 9801,213
+	.dw	   52		; 116	10401,413
+	.dw	   49		; 117	11038,367
+	.dw	   46		; 118	11714,328
+	.dw	   43		; 119	12431,682
+	.dw	   41		; 120	13192,964
+	.dw	   38		; 121	14000,866
+	.dw	   36		; 122	14858,242
+	.dw	   34		; 123	15768,121
+	.dw	   32		; 124	16733,718
+	.dw	   30		; 125	17758,446
+	.dw	   28		; 126	18845,926
+	.dw	   27		; 127	20000,000
+
+  .endif; !USE_TIMETORATE_128
+.endif	; !USE_TIMETORATE_64 && !USE_TIMETORATE_128
+
+;----------------------------------------------------------------------------
+;
+.if USE_ARPEGGIATOR
+
+ .if !USE_ARP_TIMETORATE_128
+
+ARP_TIMETORATE:
+	;	value		index	ms	bps	BPM
+	.dw	 179		;  0	3000	0,33	 20	slow
+	.dw	 188		;  1	2861	0,35	 21
+	.dw	 197		;  2	2728	0,37	 22
+	.dw	 206		;  3	2601	0,38	 23
+	.dw	 216		;  4	2480	0,40	 24
+	.dw	 227		;  5	2365	0,42	 25
+	.dw	 238		;  6	2255	0,44	 27
+	.dw	 250		;  7	2151	0,46	 28
+	.dw	 262		;  8	2051	0,49	 29
+	.dw	 275		;  9	1956	0,51	 31
+	.dw	 288		; 10	1865	0,54	 32
+	.dw	 302		; 11	1778	0,56	 34
+	.dw	 317		; 12	1696	0,59	 35
+	.dw	 332		; 13	1617	0,62	 37
+	.dw	 348		; 14	1542	0,65	 39
+	.dw	 365		; 15	1470	0,68	 41
+	.dw	 383		; 16	1402	0,71	 43
+	.dw	 402		; 17	1337	0,75	 45
+	.dw	 421		; 18	1275	0,78	 47
+	.dw	 442		; 19	1215	0,82	 49
+	.dw	 463		; 20	1159	0,86	 52
+	.dw	 486		; 21	1105	0,90	 54
+	.dw	 509		; 22	1054	0,95	 57
+	.dw	 534		; 23	1005	1,00	 60
+	.dw	 560		; 24	 958	1,04	 63
+	.dw	 588		; 25	 914	1,09	 66
+	.dw	 616		; 26	 871	1,15	 69
+	.dw	 646		; 27	 831	1,20	 72
+	.dw	 678		; 28	 792	1,26	 76
+	.dw	 711		; 29	 755	1,32	 79
+	.dw	 745		; 30	 720	1,39	 83
+	.dw	 782		; 31	 687	1,46	 87
+	.dw	 820		; 32	 655	1,53	 92
+	.dw	 859		; 33	 625	1,60	 96
+	.dw	 901		; 34	 596	1,68	101
+	.dw	 945		; 35	 568	1,76	106
+	.dw	 991		; 36	 542	1,85	111
+	.dw	1040		; 37	 516	1,94	116
+	.dw	1090		; 38	 492	2,03	122
+	.dw	1143		; 39	 470	2,13	128
+	.dw	1199		; 40	 448	2,23	134
+	.dw	1257		; 41	 427	2,34	141
+	.dw	1319		; 42	 407	2,46	147
+	.dw	1383		; 43	 388	2,58	155
+	.dw	1450		; 44	 370	2,70	162
+	.dw	1521		; 45	 353	2,83	170
+	.dw	1595		; 46	 337	2,97	178
+	.dw	1672		; 47	 321	3,12	187
+	.dw	1754		; 48	 306	3,27	196
+	.dw	1839		; 49	 292	3,43	206
+	.dw	1929		; 50	 278	3,59	216
+	.dw	2023		; 51	 265	3,77	226
+	.dw	2121		; 52	 253	3,95	237
+	.dw	2225		; 53	 241	4,14	249
+	.dw	2333		; 54	 230	4,35	261
+	.dw	2447		; 55	 219	4,56	273
+	.dw	2566		; 56	 209	4,78	287
+	.dw	2691		; 57	 200	5,01	301
+	.dw	2822		; 58	 190	5,26	315
+	.dw	2959		; 59	 181	5,51	331
+	.dw	3103		; 60	 173	5,78	347
+	.dw	3254		; 61	 165	6,06	364
+	.dw	3413		; 62	 157	6,36	381
+	.dw	3579		; 63	 150	6,67	400	fast
+
+ .else	; !USE_ARP_TIMETORATE_128
+
+ARP_TIMETORATE:
+	;	value		index	ms	bps	BPM
+	.dw	179		;   0	3000	0,33	20
+	.dw	183		;   1	2930	0,34	20
+	.dw	188		;   2	2862	0,35	21
+	.dw	192		;   3	2795	0,36	21
+	.dw	197		;   4	2730	0,37	22
+	.dw	201		;   5	2666	0,38	23
+	.dw	206		;   6	2604	0,38	23
+	.dw	211		;   7	2543	0,39	24
+	.dw	216		;   8	2484	0,40	24
+	.dw	221		;   9	2426	0,41	25
+	.dw	227		;  10	2370	0,42	25
+	.dw	232		;  11	2314	0,43	26
+	.dw	238		;  12	2260	0,44	27
+	.dw	243		;  13	2208	0,45	27
+	.dw	249		;  14	2156	0,46	28
+	.dw	255		;  15	2106	0,47	28
+	.dw	261		;  16	2057	0,49	29
+	.dw	267		;  17	2009	0,50	30
+	.dw	274		;  18	1962	0,51	31
+	.dw	280		;  19	1916	0,52	31
+	.dw	287		;  20	1872	0,53	32
+	.dw	294		;  21	1828	0,55	33
+	.dw	301		;  22	1785	0,56	34
+	.dw	308		;  23	1744	0,57	34
+	.dw	315		;  24	1703	0,59	35
+	.dw	323		;  25	1663	0,60	36
+	.dw	330		;  26	1625	0,62	37
+	.dw	338		;  27	1587	0,63	38
+	.dw	346		;  28	1550	0,65	39
+	.dw	355		;  29	1514	0,66	40
+	.dw	363		;  30	1478	0,68	41
+	.dw	372		;  31	1444	0,69	42
+	.dw	381		;  32	1410	0,71	43
+	.dw	390		;  33	1377	0,73	44
+	.dw	399		;  34	1345	0,74	45
+	.dw	409		;  35	1314	0,76	46
+	.dw	418		;  36	1283	0,78	47
+	.dw	428		;  37	1253	0,80	48
+	.dw	439		;  38	1224	0,82	49
+	.dw	449		;  39	1196	0,84	50
+	.dw	460		;  40	1168	0,86	51
+	.dw	471		;  41	1141	0,88	53
+	.dw	482		;  42	1114	0,90	54
+	.dw	493		;  43	1088	0,92	55
+	.dw	505		;  44	1063	0,94	56
+	.dw	517		;  45	1038	0,96	58
+	.dw	530		;  46	1014	0,99	59
+	.dw	542		;  47	 990	1,01	61
+	.dw	555		;  48	 967	1,03	62
+	.dw	568		;  49	 944	1,06	64
+	.dw	582		;  50	 922	1,08	65
+	.dw	596		;  51	 901	1,11	67
+	.dw	610		;  52	 880	1,14	68
+	.dw	625		;  53	 859	1,16	70
+	.dw	640		;  54	 839	1,19	71
+	.dw	655		;  55	 820	1,22	73
+	.dw	671		;  56	 801	1,25	75
+	.dw	687		;  57	 782	1,28	77
+	.dw	703		;  58	 764	1,31	79
+	.dw	720		;  59	 746	1,34	80
+	.dw	737		;  60	 729	1,37	82
+	.dw	754		;  61	 712	1,41	84
+	.dw	772		;  62	 695	1,44	86
+	.dw	791		;  63	 679	1,47	88
+	.dw	810		;  64	 663	1,51	91
+	.dw	829		;  65	 647	1,54	93
+	.dw	849		;  66	 632	1,58	95
+	.dw	869		;  67	 618	1,62	97
+	.dw	890		;  68	 603	1,66	99
+	.dw	911		;  69	 589	1,70	102
+	.dw	933		;  70	 575	1,74	104
+	.dw	955		;  71	 562	1,78	107
+	.dw	978		;  72	 549	1,82	109
+	.dw	1001		;  73	 536	1,87	112
+	.dw	1025		;  74	 524	1,91	115
+	.dw	1050		;  75	 511	1,96	117
+	.dw	1075		;  76	 500	2,00	120
+	.dw	1100		;  77	 488	2,05	123
+	.dw	1127		;  78	 477	2,10	126
+	.dw	1154		;  79	 465	2,15	129
+	.dw	1181		;  80	 455	2,20	132
+	.dw	1209		;  81	 444	2,25	135
+	.dw	1238		;  82	 434	2,31	138
+	.dw	1268		;  83	 423	2,36	142
+	.dw	1298		;  84	 414	2,42	145
+	.dw	1329		;  85	 404	2,48	149
+	.dw	1361		;  86	 395	2,53	152
+	.dw	1393		;  87	 385	2,59	156
+	.dw	1426		;  88	 376	2,66	159
+	.dw	1460		;  89	 368	2,72	163
+	.dw	1495		;  90	 359	2,79	167
+	.dw	1531		;  91	 351	2,85	171
+	.dw	1568		;  92	 342	2,92	175
+	.dw	1605		;  93	 335	2,99	179
+	.dw	1643		;  94	 327	3,06	184
+	.dw	1682		;  95	 319	3,13	188
+	.dw	1723		;  96	 312	3,21	193
+	.dw	1764		;  97	 304	3,29	197
+	.dw	1806		;  98	 297	3,36	202
+	.dw	1849		;  99	 290	3,44	207
+	.dw	1893		; 100	 284	3,53	212
+	.dw	1938		; 101	 277	3,61	217
+	.dw	1985		; 102	 271	3,70	222
+	.dw	2032		; 103	 264	3,78	227
+	.dw	2080		; 104	 258	3,88	233
+	.dw	2130		; 105	 252	3,97	238
+	.dw	2181		; 106	 246	4,06	244
+	.dw	2233		; 107	 240	4,16	250
+	.dw	2286		; 108	 235	4,26	256
+	.dw	2341		; 109	 229	4,36	262
+	.dw	2397		; 110	 224	4,46	268
+	.dw	2454		; 111	 219	4,57	274
+	.dw	2513		; 112	 214	4,68	281
+	.dw	2572		; 113	 209	4,79	288
+	.dw	2634		; 114	 204	4,91	294
+	.dw	2697		; 115	 199	5,02	301
+	.dw	2761		; 116	 194	5,14	309
+	.dw	2827		; 117	 190	5,27	316
+	.dw	2894		; 118	 185	5,39	323
+	.dw	2964		; 119	 181	5,52	331
+	.dw	3034		; 120	 177	5,65	339
+	.dw	3107		; 121	 173	5,79	347
+	.dw	3181		; 122	 169	5,92	355
+	.dw	3257		; 123	 165	6,07	364
+	.dw	3335		; 124	 161	6,21	373
+	.dw	3414		; 125	 157	6,36	382
+	.dw	3496		; 126	 154	6,51	391
+	.dw	3579		; 127	 150	6,67	400
+
+ .endif ; !USE_ARP_TIMETORATE_128
+
+.endif	; USE_ARPEGGIATOR
 
 ;----------------------------------------------------------------------------
 ;
@@ -1287,12 +1893,6 @@ TAB_VOLUME:
 ;----------------------------------------------------------------------------
 .endif	; USE_MASTER_VOLUME
 
-.if USE_UART
-;	.nolist
-	.include "uart.inc"
-;	.list
-.endif	; USE_UART
-
 ;----------------------------------------------------------------------------
 ;	I N T E R R U P T   S U B R O U T I N E S
 ;----------------------------------------------------------------------------
@@ -1310,8 +1910,8 @@ TAB_VOLUME:
 
 ; Push contents of registers onto the stack
 ;
-	.def	OSC_OUT_L	= r14		; pre-filter audio
-	.def	OSC_OUT_H	= r15		; temporary used in ISR, not saved on stack
+	.def	OSC_OUT_L	= r14	; pre-filter audio
+	.def	OSC_OUT_H	= r15	; temporary used in ISR, not saved on stack
 
 	.def	LDAC	= r16
 	.def	HDAC	= r17
@@ -1321,20 +1921,20 @@ TAB_VOLUME:
 	.def	temp2	= r31		; dto
 
 TIM2_CMP:
-	push	r16		; wave B
-	in	r16, SREG	; \
-	push	r16		; / push SREG
-	push	r17		; wave A
+	push	r16			; wave B
+	in	r16, SREG		; \
+	push	r16			; / push SREG
+	push	r17			; wave A
 	push	r18
 	push	r19
 	push	r20
-	push	r21		; PATCH_SWITCH1
-	push	r22		; WAVETABLE, PATCH_SWITCH3, temp
-	push	r23		; PATCH_SWITCH2
-	push	r30		; ZL poiter to tables
-	push	r31		; ZH
-	push	r0		; MUL result
-	push	r1		; dto.
+	push	r21			; PATCH_SWITCH1
+	push	r22			; WAVETABLE, PATCH_SWITCH3, temp
+	push	r23			; PATCH_SWITCH2
+	push	r30			; ZL poiter to tables
+	push	r31			; ZH
+	push	r0			; MUL result
+	push	r1			; dto.
 
 	lds	r21, PATCH_SWITCH1	; Load the mode flag settings so we can check the selected waveform,
 	lds	r23, PATCH_SWITCH2	; noise and distortion settings.
@@ -1603,19 +2203,22 @@ MIXER_END:
 ;
 ; A 2-pole resonant low pass filter:
 ;
-; a += F * ((in - a) + q * 4 * (a - b))
-; b += F * (a - b)
+; a += f * ((in - a) + q * 4 * (a - b))
+; b += f * (a - b)
+;
+; f = (1-F)/2+Q_offset
+; q = Q-f = Q-(1-F)/2+Q_offset
 ;
 ; F = LPF (cutoff)
 ; Q = RESONANCE
 ; q = SCALED_RESONANCE
 ; b => output
 ;
-; f = (1-F)/2+Q_offset
-; q = Q-f = Q-(1-F)/2+Q_offset
-;
 ; Input 16-Bit signed HDAC:LDAC (r17:r16), already scaled to minimize clipping (reduced to 25% of full code).
 ;
+;----------------------------------------------------------------------------
+; see also
+;   http://www.kvraudio.com/forum/printview.php?t=225711
 ;----------------------------------------------------------------------------
 
 	; calc (in - a) ; both signed
@@ -1623,14 +2226,11 @@ MIXER_END:
 	sbc	HDAC, a_H
 					; check for overflow / do hard clipping
 	brvc	OVERFLOW_1		; if overflow bit is clear jump to OVERFLOW_1
-
 					; sub overflow happened -> set to min
 					; 0b1000.0000 0b0000.0001 -> min
 					; 0b0111.1111 0b1111.1111 -> max
-
 	ldi	LDAC, 0b00000001
 	ldi	HDAC, 0b10000000
-
 OVERFLOW_1:				; when overflow is clear
 
 					; (in-a) is now in HDAC:LDAC as signed
@@ -1649,12 +2249,12 @@ OVERFLOW_2:
 					; 0b0111.1111 0b1111.1111 -> max
 	ldi	r20, 0b00000001
 	ldi	r21, 0b10000000
-
 OVERFLOW_3:
 
 	lds	r18, PATCH_SWITCH1	; Check Low Pass/High Pass panel switch.
 	sbrs	r18, SW_FILTER_MODE
 	rjmp	CALC_LOWPASS
+
 SKIP_REZ:
 	movw	z_L, r20		; High Pass selected, so just load r21:r20 into z_H:z_L to disable Q
 	rjmp	DCF_ADD			; Skip lowpass calc
@@ -1662,12 +2262,11 @@ SKIP_REZ:
 CALC_LOWPASS:
 	; skip resonance calculation if VCF is turned off (value of 0)
 	lds	r18, VCF_STATUS
-	tst	r18
+	tst	r18			; test for ENV_STOP
 	breq	SKIP_REZ
 					; mul signed:unsigned -> (a-b) * q
 					; 16x8 into 16-bit
 					; r19:r18 = r21:r20 (ah:al) * r22 (b)
-
 	mulsu	r21, r22		; (signed)ah * b
 	movw	r18, r0
 	mul	r20, r22		; al * b
@@ -1685,39 +2284,32 @@ OVERFLOW_3A:
 	lsl	r18
 	rol	r19
 OVERFLOW_3B:
-	movw	z_L, r18		; q*(a-b) in z_H:z_L as signed
 
+	movw	z_L, r18		; q*(a-b) in z_H:z_L as signed
 					; add both
 					; both signed
 					; ((in-a)+q*(a-b))
 					; => HDAC:LDAC + z_H:z_L
 DCF_ADD:
-
 	add	LDAC, z_L
 	adc	HDAC, z_H
 
 	brvc	OVERFLOW_4		; if overflow is clear
 					; 0b1000.0000 0b0000.0001 -> min
 					; 0b0111.1111 0b1111.1111 -> max
-
 	ldi	LDAC, 0b11111111
 	ldi	HDAC, 0b01111111
-
 OVERFLOW_4:
-
 					; Result is a signed value in HDAC:LDAC
 					; calc * f
 					; ((in-a)+q*(a-b))*f
-
 	lds	r20, LPF_I		; load lowpass 'F' value
 	lds	r18, PATCH_SWITCH1
 	sbrc	r18, SW_FILTER_MODE	; Check LP/HP switch.
 	lds	r20, HPF_I		; Switch set, so load 'F' for HP
-
 					; mul signed unsigned HDAC*F
 					; 16x8 into 16-bit
 					; r19:r18 = HDAC:LDAC (ah:al) * r20 (b)
-
 	mulsu	HDAC, r20		; (signed)ah * b
 	movw	r18, r0
 	mul	LDAC, r20		; al * b
@@ -1729,7 +2321,6 @@ OVERFLOW_4:
 NO_ROUND2:
 					; Add result to 'a'
 					; a+=f*((in-a)+q*(a-b))
-
 	add	a_L, r18
 	adc	a_H, r19
 	brvc	OVERFLOW_5		; if overflow is clear
@@ -1739,12 +2330,10 @@ NO_ROUND2:
 	ldi	z_H, 0b01111111
 	mov	a_L, z_L
 	mov	a_H, z_H
-
 OVERFLOW_5:
 					; calculated a+=f*((in-a)+q*(a-b)) as signed value and saved in a_H:a_L
 					; calc 'b'
 					; b += f * (a*0.5 - b)
-
 	mov	z_H, a_H		; \
 	mov	z_L, a_L		; / load 'a' as signed
 
@@ -1757,17 +2346,14 @@ OVERFLOW_5:
 	brvc	OVERFLOW_6		; if overflow is clear
 					; 0b1000.0000 0b0000.0001 -> min
 					; 0b0111.1111 0b1111.1111 -> max
-
 	ldi	z_L, 0b00000001
 	ldi	z_H, 0b10000000
-
 OVERFLOW_6:
 
 	lds	r20, LPF_I		; load lowpass 'F' value
 	lds	r18, PATCH_SWITCH1
 	sbrc	r18, SW_FILTER_MODE	; Check LP/HP switch.
 	lds	r20, HPF_I		; Switch set to HP, so load 'F' for HP
-
 					; mul signed unsigned (a-b) * F
 					; 16x8 into 16-bit
 					; r19:r18 = z_H:z_L (ah:al) * r20 (b)
@@ -1777,30 +2363,22 @@ OVERFLOW_6:
 	add	r18, r1			; signed result in r19:r18
 	adc	r19, ZERO
 
-
 	add	temp,  r18		; \ add result to 'b' , signed
 	adc	temp2, r19		; / b +=(a-b)*f
 
 	brvc	OVERFLOW_7		; if overflow is clear
-
 					; 0b1000.0000 0b0000.0001 -> min
 					; 0b0111.1111 0b1111.1111 -> max
-
 	ldi	temp,  0b11111111
 	ldi	temp2, 0b01111111
-
 OVERFLOW_7:
 
 	sts	b_L, temp		; \
 	sts	b_H, temp2		; / save value of 'b'
-
-
 	mov	LDAC, temp		; B now contains the filtered signal in HDAC:LDAC
 	mov	HDAC, temp2		; output sample HDAC:LDAC = r17:r16
 
-
 					; If in HP filter mode, just use (filter input - filter output)
-
 	lds	r18, PATCH_SWITCH1	; Check if LP or HP filter
 	sbrs	r18, SW_FILTER_MODE
 	rjmp	DCA			; LP, so jump to DCA
@@ -1974,7 +2552,7 @@ UART_RXC:
 	push	r16			; / push SREG
 
 	in	r16, UDR		; read received byte in r16
-	cbi	UCR, 7			; RXCIE=0 (disable UART interrupts)
+	cbi	UCSRB, RXCIE		; RXCIE=0 (disable UART interrupts)
 	sei				; enable other interrupts
 	push	r17
 
@@ -2061,6 +2639,8 @@ INTRX_NON2:
 ; turn note off:
 INTRXNON2_OFF:
 	lds	r16, MIDIDATA0		; new note
+;-------------------------
+.if !USE_ARPEGGIATOR
 	lds	r17, MIDINOTEPREV
 	cp	r16, r17		; same note as previous note
 	brne	INTRXNON2_OFF1		; no
@@ -2072,8 +2652,8 @@ INTRXNON2_OFF1:
 	cp	r16, r17		; \
 	brne	INTRXNON2_OFF3		; / exit when not the same note
 	lds	r17, MIDINOTEPREV
-	cpi	r17, 255
-	breq	INTRXNON2_OFF2
+	cpi	r17, 255		; previous note is invalid?
+	breq	INTRXNON2_OFF2		; yes: no more notes => gate = 0
 	sts	MIDINOTE, r17		; previous note is now valid again
 	ldi	r17, 255		; \ remove previous note
 	sts	MIDINOTEPREV, r17	; / from buffer
@@ -2084,6 +2664,17 @@ INTRXNON2_OFF3:
 INTRXNON2_OFF2:
 	ldi	r17, 255		; \
 	sts	MIDINOTE, r17		; / remove last note
+;-------------------------
+.else	; !USE_ARPEGGIATOR
+	rcall	note_delete		; remove note (r16) from buffer
+	rcall	note_current		; get the next valid note from the buffer
+	sts	MIDINOTE_NEXT, r16	; update MIDINOTE, can be invalid
+	cpi	r16, 255
+	breq	INTRXNON2_OFF4		; no more notes => gate = 0
+	rjmp	INTRX_EXIT
+INTRXNON2_OFF4:
+.endif	; !USE_ARPEGGIATOR
+
 	ldi	r17, 0			; \
 	sts	GATE, r17		; / GATE = 0
 
@@ -2093,12 +2684,23 @@ INTRXNON2_OFF2:
 ; turn note on:
 INTRXNON2_ON:
 	sts	MIDIVELOCITY, r16	; store velocity
+					; use velocity of last pessed note
+;-------------------------
+.if !USE_ARPEGGIATOR
 	lds	r17, MIDINOTE		; \ move previous note
 	sts	MIDINOTEPREV, r17	; / into buffer
 	lds	r17, MIDIDATA0		; \
 	sts	MIDINOTE, r17		; / MIDINOTE = note#
-	ldi	r17, 1
-	sts	GATE, r17		; GATE = 1
+;-------------------------
+.else	; !USE_ARPEGGIATOR
+	lds	r16, MIDIDATA0
+	rcall	note_add		; store the note in the next free location in the buffer
+	rcall	note_current		; get the next valid note from the buffer
+	sts	MIDINOTE_NEXT, r16	; update MIDINOTE, can be invalid
+.endif	; !USE_ARPEGGIATOR
+
+	ldi	r17, 1			; \
+	sts	GATE, r17		; / GATE = 1
 	sts	GATEEDGE, r17		; GATEEDGE = 1
 
 	cbi	PORT_MIDI_LED, MIDI_LED	; LED off
@@ -2205,13 +2807,13 @@ INTRX_KNOB_ADC:
 	subi	r17, $30		; reduce to 0..15
 	cbr	r17, $f8		; Clear highest 5 bits, leaving knob 0..7
 
-	ldi	r26, low(ADC_0)
+	ldi	r26, low(ADC_0)		; get current adc value
 	ldi	r27, high(ADC_0)
 	add	r26, r17
 	adc	r27, zero
 	ld	r16, x			; Fetch ADC_X into r16
 
-	ldi	r26, low(OLD_ADC_0)
+	ldi	r26, low(OLD_ADC_0)	; update old adc value with current adc value
 	ldi	r27, high(OLD_ADC_0)
 	add	r26, r17
 	adc	r27, zero
@@ -2360,12 +2962,12 @@ INTRX_SW41:
 INTRX_SW42:
 	cpi	r17, 2
 	brne	INTRX_SW43
-	bld	r26, SW_USER_4_2	; Set bit in PATCH_SWITCH4
+	bld	r26, SW_ARP_ENABLE	; Set bit in PATCH_SWITCH4
 	rjmp	INTRX_SW4EXIT
 INTRX_SW43:
 	cpi	r17, 3
 	brne	INTRX_SW44
-	bld	r26, SW_USER_4_3	; Set bit in PATCH_SWITCH4
+	bld	r26, SW_ARP_REPEAT	; Set bit in PATCH_SWITCH4
 	rjmp	INTRX_SW4EXIT
 INTRX_SW44:
 	cpi	r17, 4
@@ -2410,17 +3012,17 @@ INTRX_SW31:
 INTRX_SW32:
 	cpi	r17, 2
 	brne	INTRX_SW33
-	bld	r26, SW_USER_3_2	; Set bit in PATCH_SWITCH3
+	bld	r26, SW_DCA_MODE	; Set bit in PATCH_SWITCH3
 	rjmp	INTRX_SW3EXIT
 INTRX_SW33:
 	cpi	r17, 3
 	brne	INTRX_SW34
-	bld	r26, SW_TRANSPOSE	; Set bit in PATCH_SWITCH3
+	bld	r26, SW_DCA_OPEN	; Set bit in PATCH_SWITCH3
 	rjmp	INTRX_SW3EXIT
 INTRX_SW34:
 	cpi	r17, 4
 	brne	INTRX_SW35
-	bld	r26, SW_DCA_MODE	; Set bit in PATCH_SWITCH3
+	bld	r26, SW_TRANSPOSE	; Set bit in PATCH_SWITCH3
 	rjmp	INTRX_SW3EXIT
 INTRX_SW35:
 	cpi	r17, 5
@@ -2442,6 +3044,7 @@ INTRX_SW3EXIT:				; Finished switch scan, store updated switch bytes
 ; - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 INTRX_SAVE:
+; Save all other controllers
 ; r16 parameter  value
 ; r17 contoller#
 	ldi	r26, low(MIDICC)
@@ -2488,14 +3091,15 @@ INTRX_LFO2FREQ:
 	ldi	r17, 6			; CC18 LFO2FREQ -> knob 6 KNOB_PULSE
 
 INTRX_UPD_KNOB:
-; update knob status and setup OLD_ADC value
-	ldi	r26, low(ADC_0)
+; after midi cc update for the alternative knobs also
+; update the primary knob status and setup their OLD_ADC value
+	ldi	r26, low(ADC_0)		; get current adc value
 	ldi	r27, high(ADC_0)
 	add	r26, r17
 	adc	r27, zero
 	ld	r16, x			; Fetch ADC_X into r16
 
-	ldi	r26, low(OLD_ADC_0)
+	ldi	r26, low(OLD_ADC_0)	; update old adc value with current adc value
 	ldi	r27, high(OLD_ADC_0)
 	add	r26, r17
 	adc	r27, zero
@@ -2583,12 +3187,214 @@ INTRX_EXIT:
 	pop	r16			; \
 	out	SREG, r16		; / pop SREG
 	pop	r16
-	sbi	UCR, 7			; RXCIE=1
+	sbi	UCSRB, RXCIE		; RXCIE=1
 	reti
+
+.if USE_SERIAL_OUT
+;----------------------------------------------------------------------------
+; UART transmitter (MIDI_OUT)
+;----------------------------------------------------------------------------
+
+UART_UDRE:
+	push	r16
+	in	r16, SREG		; \
+	push	r16			; / push SREG
+	cbi	UCSRB, UDRIE		; disable UART interrupt
+	sei				; enable other interrupts
+
+	push	r17
+	push	r30			; ZL poiter to tables
+	push	r31			; ZH
+
+	; if ( UART_TxHead != UART_TxTail)
+	lds	r17, UART_TxHead
+	lds	r16, UART_TxTail
+	cp	r17, r16
+	breq	INTTX_EXIT		;  tx buffer empty, don#t enable uart interrupt
+
+	; calculate and store new buffer index
+	; tmptail = (UART_TxTail + 1) & UART_TX_BUFFER_MASK;
+	lds	r30, UART_TxTail
+	subi	r30, -1
+	andi	r30, UART_TX_BUFFER_MASK
+
+	; UART_TxTail = tmptail;
+	sts	UART_TxTail, r30
+
+	; get one byte from buffer and write it to UART
+	; UART0_DATA = UART_TxBuf[tmptail]
+	; start transmitter
+	ldi	r31, 0x00
+	subi	r30, LOW( -UART_TxBuf)
+	sbci	r31, HIGH( -UART_TxBuf)
+	ld	r16, Z
+	out	UDR, r16
+
+	; disable global interrupt,
+	; so we can leave this service routine properly
+	cli
+	sbi	UCSRB, UDRIE		; enable uart interrupt
+
+INTTX_EXIT:
+	pop	r31
+	pop	r30
+	pop	r17
+	pop	r16			; \
+	out	SREG, r16		; / pop SREG
+	pop	r16
+	reti
+.endif	; USE_SERIAL_OUT
 
 ;----------------------------------------------------------------------------
 ;	M A I N   L E V E L   S U B R O U T I N E S
 ;----------------------------------------------------------------------------
+
+.if USE_DEBUG_OUT
+;	.nolist
+	.include "debug_uart.inc"
+;	.list
+.endif	; USE_DEBUG_OUT
+
+;----------------------------------------------------------------------------
+; initialize UART
+;----------------------------------------------------------------------------
+
+	.equ	midi_ubrr_val   = ((cpu_frequency+midi_baud_rate*8)/(midi_baud_rate*16)-1)	; smart rounding
+	.equ	midi_baud_real  = (cpu_frequency/(16*(midi_ubrr_val+1)))					; real baudrate
+	.equ	midi_baud_error = ((midi_baud_real*1000)/midi_baud_rate-1000)				; error in promille
+
+.if ((midi_baud_error>10) || (midi_baud_error<-10))							; max. +/-10 promille error
+  .error "MIDI baudrate error greater than 1 percent, too high!"
+.endif
+
+uart_init:
+	; set midi frequency 31250 Hz (32us)
+	ldi	r16, high( midi_ubrr_val) & ~(1<<URSEL)
+	out	UBRRH, r16
+	ldi	r16, low( midi_ubrr_val)
+	out	UBRRL, r16
+
+.if USE_SERIAL_OUT
+; enable transmitter, receiver and receiver interrupt
+	ldi	r16, (1<<TXEN)|(1<<RXCIE)|(1<<RXEN)
+	out	UCSRB, r16
+.else
+; enable receiver and receiver interrupt
+	ldi	r16, (1<<RXCIE)|(1<<RXEN)	; \
+	out	UCSRB, r16			; / RXCIE=1, RXEN=1
+.endif	; USE_SERIAL_OUT
+	ret
+
+.if USE_SERIAL_OUT
+;----------------------------------------------------------------------------
+;
+;----------------------------------------------------------------------------
+; r16 character to send
+; r17 tmphead
+; r18 UART_TxTail
+; r31:r30 pointer to transmitter buffer
+
+uart_putc:
+	push	r17
+	push	r18
+	push	r30			; ZL poiter to tables
+	push	r31			; ZH
+
+	; tmphead  = (UART_TxHead + 1) & UART_TX_BUFFER_MASK;
+	lds	r17, UART_TxHead
+	subi	r17, -1
+	andi	r17, UART_TX_BUFFER_MASK
+
+	; while ( tmphead == UART_TxTail)
+	; wait for free space in buffer
+uart_putc_wait:
+	lds	r18, UART_TxTail
+	cp	r17, r18		; tmphead == UART_TxTail
+	breq	uart_putc_wait
+
+	; UART_TxBuf[tmphead] = data;
+	mov	r30, r17
+	ldi	r31, 0x00
+	subi	r30, LOW( -UART_TxBuf)
+	sbci	r31, HIGH( -UART_TxBuf)
+	st	Z, r16
+
+	sts	UART_TxHead, r17	; UART_TxHead = tmphead;
+	sbi	UCSRB, UDRIE		; enable UDRE interrupt, start transmitter
+
+	pop	r31
+	pop	r30
+	pop	r18
+	pop	r17
+	ret
+
+tx_buf_empty:
+	push	r17
+	; if ( UART_TxHead == UART_TxTail)
+	lds	r17, UART_TxHead
+	lds	r16, UART_TxTail
+	cp	r17, r16
+	ldi	r16, 0xff		; empty
+	breq	tx_buf_is_empty
+	ldi	r16, 0x00		; not empty
+tx_buf_is_empty:
+	pop	r17
+	ret				; 0: not empty, -1: empty
+.endif	; USE_SERIAL_OUT
+
+;----------------------------------------------------------------------------
+; send midi cc message
+;----------------------------------------------------------------------------
+;  r16 cc param
+;  r17 cc value
+
+.if USE_SERIAL_OUT | USE_DEBUG_OUT
+
+send_midi_cc:
+ .if USE_SERIAL_OUT
+ 	push	r16
+ 	lds	r16, CONTROL_STATE
+ 	andi	r16, (1<<ENABLE_MIDI_CC_OUT)
+ 	pop	r16
+ 	breq	send_midi_cc_exit
+
+	push	r17			; save cc value
+	push	r16			; save cc param
+
+	ldi	r16, 0xB0		; control change
+	rcall	uart_putc
+	pop	r16			; get cc param
+	rcall	uart_putc		; cc param
+	pop	r16			; get cc value
+	rcall	uart_putc		; cc value
+	ret
+send_midi_cc_exit:
+ .endif	; USE_SERIAL_OUT
+
+ .if USE_DEBUG_OUT
+ 	push	r16
+ 	lds	r16, CONTROL_STATE
+ 	andi	r16, (1<<ENABLE_DEBUG_OUT)
+ 	pop	r16
+ 	breq	debug_out_exit
+
+	rcall	debug_entry		; open for send midi cc
+
+	rcall	debug_uart_write_byte	; cc param
+	ldi	r16, ' '		; print blank
+	rcall	debug_uart_transmit
+	mov	r16, r17
+	rcall	debug_uart_write_byte	; cc value
+
+	rcall	debug_uart_write_crlf
+	rcall	debug_exit
+	ret
+debug_out_exit:
+ .endif	 ; USE_DEBUG_OUT
+
+	ret
+
+.endif	; USE_SERIAL_OUT || USE_DEBUG_OUT
 
 ;=============================================================================
 ;	Delay subroutines
@@ -2652,19 +3458,19 @@ ADCE_LOOP:
 ; Out:	r17:r16 = x asr n
 ; Used:	SREG
 ;----------------------------------------------------------------------------
-ASr16:
+ASR16:
 	tst	r18
-	breq	ASr16_EXIT
+	breq	ASR16_EXIT
 	push	r18
 
-ASr16_LOOP:
+ASR16_LOOP:
 	asr	r17			; \
 	ror	r16			; / r17:r16 = r17:r16 asr 1
 	dec	r18
-	brne	ASr16_LOOP
+	brne	ASR16_LOOP
 	pop	r18
 
-ASr16_EXIT:
+ASR16_EXIT:
 	ret
 
 ;----------------------------------------------------------------------------
@@ -2905,8 +3711,12 @@ TAB_WORD:
 ; Used:	SREG, r0, r30:r31
 ;----------------------------------------------------------------------------
 ADCTORATE:
+.if !USE_TIMETORATE_64 && !USE_TIMETORATE_128
+ .if !USE_TIMETORATE_128
 	lsr	r16
+ .endif	; !USE_TIMETORATE_128
 	lsr	r16
+.endif	; !USE_TIMETORATE_64 && !USE_TIMETORATE_128
 	lsr	r16			; 0..31
 	ldi	r30, low( TIMETORATE)
 	ldi	r31, high(TIMETORATE)
@@ -2920,7 +3730,7 @@ ADCTORATE:
 ; - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 ; In:	r16 = x		0..255
 ; Out:	r17:r16 = y	0,000..255,996
-; Used:	SREG, r18-r30
+; Used:	SREG, r18, r22, r23, r30, r31
 ;----------------------------------------------------------------------------
 NONLINPOT:
 	ldi	r22, 0
@@ -3132,452 +3942,262 @@ LD_PATCH_2:
 ; Used:	r16-r20, r28, r29, SREG
 ;----------------------------------------------------------------------------
 POT_SCAN:
-	ldi	r28, low(KNOB0_STATUS)
-	ldi	r29, high(KNOB0_STATUS)
-	add	r28, r20
-	adc	r29, ZERO
-	ld	r18, Y			; load KNOBN_STATUS value into r18
-	sbrc	r18, 0			; Check bit 0
-	rjmp	LOAD_ADC		; KNOBN_STATUS is set, so just update parameter
-	mov	r19, r16
-
-	ldi	r28, low(OLD_ADC_0)
+	ldi	r28, low(OLD_ADC_0)	; get old adc value
 	ldi	r29, high(OLD_ADC_0)
 	add	r28, r20
 	adc	r29, ZERO
 	ld	r17, Y			; load OLD_ADC_N value into r17
-	sub	r19, r17
-	brpl	DEAD_CHECK
-	neg	r19
-DEAD_CHECK:
-	cpi	r19, PARAM_DEAD_ZONE
-	brlo	NO_CHANGE		; Skip ahead if pot change is < the deadzone limit
-	sbr	r18, 1			; Update knob status bit and continue -- pot moved
-	ldi	r28, low(KNOB0_STATUS)
-	ldi	r29, high(KNOB0_STATUS)
+
+	ldi	r28, low(KNOB0_STATUS)	; KNOBn_STATUS is clear after MIDI cc message,
+	ldi	r29, high(KNOB0_STATUS)	; Load/Save patch and Upper/lower switch
 	add	r28, r20
 	adc	r29, ZERO
-	st	Y, r18			; save updated KNOBN_STATUS
-	rjmp	LOAD_ADC
+	ld	r18, Y			; load KNOBN_STATUS value into r18
 
-NO_CHANGE:
+	mov	r19, r16		; current adc - old adc (signed result)
+	sub	r19, r17		; delta 0 adc - old_adc
+	brne	POT_SCAN_CHANGED	; branch if adc is not old adc
+	andi	r18, 0x80		; clear error-value in KNOBn_STATUS
+	st	Y, r18
+	rjmp	POT_NOT_CHANGED
+
+POT_SCAN_CHANGED:
+	; delta (r19) != 0: error (r18) += delta (r19)
+	bst	r18, 6			; sign extend copy bit 6 to bit 7
+	bld	r18, 7
+	add	r18, r19		; later bit 7 will be set to 1
+	mov	r19, r18
+	brpl	POT_DEAD_CHECK
+	neg	r19
+POT_DEAD_CHECK:
+	cpi	r19, PARAM_DEAD_ZONE
+	brlo	POT_SMALL_CHANGE
+
+	clr	r18			; clear error-value
+	sbr	r18, 0x80		; Update knob status bit and continue -- pot moved
+	st	Y, r18			; save updated KNOBN_STATUS
+
+	ldi	r28, low(OLD_ADC_0)	; update old adc value with current adc value
+	ldi	r29, high(OLD_ADC_0)
+	add	r28, r20
+	adc	r29, ZERO
+	st	Y, r16			; OLD_ADC = ADC
+POT_CHANGED:
+	ldi	r17, 1			; flag pot changed
+	ret
+
+POT_SMALL_CHANGE:
+	sbr	r18, 0x80		; Update knob status bit and continue -- pot moved
+	st	Y, r18			; save updated KNOBN_STATUS
+POT_NOT_CHANGED:
 	ldi	r17, 0			; flag pot unchanged
 	ret
 
-LOAD_ADC:
-	ldi	r17, 1			; flag pot changed
+.if USE_ARPEGGIATOR
+;----------------------------------------------------------------------------
+; note management
+;----------------------------------------------------------------------------
+;
+;      +- NOTES_BUFFER                                 +- NOTES_BUFFER+BUFFER_SIZE
+;      v                                               v
+;      +-----+-----+-----+-----+-----+-----+-----+-----+
+;      | #A 0| #C 1| #D 2| #n 3|    4|    5|    6|    7|
+;      +-----+-----+-----+-----+-----+-----+-----+-----+
+;       begin       ^     ^                         end
+;       head        |     |                        tail
+;  ARPNOTE = 6 (2)  +     + NOTES_ACTIVE = 3 (a)
+;
+; (a) next postion to store a new note
+; (b) current played note
+;
+;----------------------------------------------------------------------------
+; note_add         store a new note in the buffer
+; note_current     get the current or last valid note from the buffer
+; note_delete      search note in buffer and then remove it from buffer
+; note_next        get the next note after note index (ARPNOTE)
+; note_remove      remove note at APRNOTE from buffer
+; note_find	   search note (r16) in the buffer
+; note_shift       shift forward all subsequent notes
+
+;-------------------------
+; store a new note in the buffer
+; r16 -> note to add to buffer
+
+note_add:
+	ldi	r26, low( NOTES_BUFFER)
+	ldi	r27, high(NOTES_BUFFER)
+	ldi	r18, NOTES_BUFFERSIZE
+	lds	r17, NOTES_ACTIVE	; increment active note count
+	cp	r17, r18		; NOTES_ACTIVE < NOTES_BUFFERSIZE
+	brlo	note_add_space		; then buffer has space
+
+	; buffer is full
+	clr	r17			; remove first/oldest note
+	rcall	note_shift
+	rjmp	note_add_store
+
+note_add_space:
+	add	r26, r17
+	adc	r27, zero
+note_add_store:
+	st	x, r16			; store note
+	inc	r17			; increment number of notes in buffer
+	sts	NOTES_ACTIVE, r17
+
+note_add_done:
 	ret
+
+;-------------------------
+; the current note is the last valid note saved to the buffer
+; get this note in r16
+
+note_current:
+	lds	r18, NOTES_ACTIVE
+	tst	r18			; are there any notes in the buffer?
+	breq	note_current_false
+	dec	r18
+
+	; get the last valid note
+	ldi	r26, low( NOTES_BUFFER)
+	ldi	r27, high(NOTES_BUFFER)
+	add	r26, r18
+	adc	r27, zero
+	ld	r16, x			; get valid note from buffer
+	ret
+
+note_current_false:
+	ldi	r16, $ff		; no valid note found in buffer
+	ret
+
+;-------------------------
+; search note (r16) in buffer
+
+note_find:
+	ldi	r26, low( NOTES_BUFFER)
+	ldi	r27, high(NOTES_BUFFER)
+	clr	r17			; note index
+
+	; start from the head of the buffer
+note_find_loop:
+	ld	r18, x			; get note from buffer
+	cp	r18, r16		; compare note
+	breq	note_find_true
+
+	adiw	r26, 1			; increment ptr to buffer
+	inc	r17			; increment note index
+	cpi	r17, NOTES_BUFFERSIZE	; index < NOTES_BUFFERSIZE
+	brlo	note_find_loop	; yes: loop
+
+	; requested note not found in the buffer
+note_find_false:
+	clt
+	ret
+
+	; requested note found in the buffer
+note_find_true:
+	set				; r27:r26 points to note found
+	ret				; r17 index of note found
+
+;-------------------------
+; shift forward all subsequent notes
+;r17     -> note index
+;r27:r26 -> note address
+;r18        xx
+
+; r17 = 4
+; before  0 1 2 3 ff 5 6 7
+; after   0 1 2 3  5 6 7 ff
+
+note_shift:
+	cpi	r17, NOTES_BUFFERSIZE-1	; index < NOTES_BUFFERSIZE-1
+	brsh	note_shift_done		; leave when end of buffer reached
+	adiw	r26, 1			; increment buffer address
+	ld	r18, x			; get the note
+	st	-x, r18			; move note to the previous address
+	adiw	r26, 1			; increment the buffer address again
+	inc	r17
+	rjmp	note_shift
+
+note_shift_done:
+	ret
+
+;-------------------------
+; search note in buffer and then remove it from buffer
+; r16     -> note to removed from buffer
+
+note_delete:
+	rcall	note_find		; search for active note
+					; return r17     <- note index
+					;        r27:r26 <- note addres
+	brtc	note_delete_done	; note not found in buffer
+
+	; shift forward all subsequent notes
+	; deleted note overwrite with the next note
+	; r17 position of note to delete
+	; r27:r26 points to the note in the buffer
+note_do_shift:
+	rcall	note_shift
+	; free note at tail of buffer
+	ldi	r16, $ff
+	st	x, r16
+
+	lds	r18, NOTES_ACTIVE
+	dec	r18			; decrement active note count
+	sts	NOTES_ACTIVE, r18
+note_delete_done:
+	ret
+
+;-------------------------
+; ARPNOTE points to the current played note, so get the next note
+
+note_next:
+	lds	r16, ARPNOTE  		; midi note buffer index
+	inc	r16			; points to next note
+
+note_index:
+	lds	r18, NOTES_ACTIVE
+	tst	r18			; are there any notes in the buffer?
+	breq	note_next_done
+
+	cp	r16, r18		; current ARPNOTE points to buffers tail?
+	brlo	note_next_valid
+	clr	r16			; wrap to head of buffer
+
+note_next_valid:
+	sts	ARPNOTE, R16
+
+	ldi	r26, low( NOTES_BUFFER)
+	ldi	r27, high(NOTES_BUFFER)
+	add	r26, r16
+	adc	r27, zero
+	ld	r16, x			; get valid note from buffer
+	sts	MIDINOTE, r16		; overwrite current note
+note_next_done:
+	ret
+
+;-------------------------
+; remove note at APRNOTE from buffer
+
+note_remove:
+	lds	r16, NOTES_ACTIVE
+	tst	r16
+	breq	note_delete_done	; there is no note in the buffer
+
+	ldi	r26, low( NOTES_BUFFER)
+	ldi	r27, high(NOTES_BUFFER)
+	lds	r17, ARPNOTE  		; midi note buffer index
+	add	r26, r17
+	adc	r27, zero
+
+	rjmp	note_do_shift
+
+.endif ; USE_ARPEGGIATOR
 
 ;----------------------------------------------------------------------------
 ;	M A I N   P R O G R A M
 ;----------------------------------------------------------------------------
-RESET:
-	cli				; disable interrupts
 
-; JTAG Disable - Set JTD in MCSCSR
-	lds	r16, MCUCSR		; Read MCUCSR
-	sbr	r16, 1 << JTD		; Set jtag disable flag
-	out	MCUCSR, r16		; Write MCUCSR
-	out	MCUCSR, r16		; and again as per datasheet
-
-; initialize stack:
-	ldi	r16, low(RAMEND)
-	ldi	r17, high(RAMEND)
-	out	SPL, r16
-	out	SPH, r17
-
-; initialize variables:
-	clr	ZERO
-	clr	PHASEA_0
-	clr	PHASEA_1
-	clr	PHASEA_2
-	clr	PHASEB_0
-	clr	PHASEB_1
-	clr	PHASEB_2
-
-	clr	a_L			; clear DCF registers	(lp_L)
-	clr	a_H			;			(lp_H)
-
-	ldi	r16, 5
-	sts	KNOB_DEADZONE, r16	; not used
-
-	ldi	r16, 0
-	sts	LED_STATUS, r16		; LED status = off
-	sts	LED_TIMER, r16		; clear it
-	sts	BUTTON_STATUS, r16	; clear it, no buttons pressed
-	sts	CONTROL_SWITCH, r16	; clear it, no switches flipped
-	sts	SETMIDICHANNEL, r16	; Default MIDI channel to zero (omni)
-	sts	SWITCH3, r16		; clear it, MIDI/Save/Load switch hasn't been scanned yet, so clear it
-.if USE_ORIGINAL_DCO_FM
-	sts	FMDEPTH, r16		; FM Depth = 0
-.endif	; USE_ORIGINAL_DCO_FM
-
-	sts	MIDI_TASK_UPDATE, r16	; no active task
-
-	sts	RESONANCE, r16		; Resonance = 0
-	sts	PORTAMENTO, r16		; Portamento = 0
-	sts	SETMIDICHANNEL, r16	; 0 for OMNI or 1..15
-	sts	GATE, r16		; GATE = 0
-	sts	GATEEDGE, r16		; GATEEDGE = 0
-	sts	LEVEL, r16		; LEVEL = 0
-	sts	ENV_FRAC_L, r16		; \
-	sts	ENV_FRAC_H, r16		;  > ENV = 0
-	sts	ENV_INTEGR, r16		; /
-.if USE_INIT_LFO2
-	sts	ENV_FRAC_L2, r16	; \
-	sts	ENV_FRAC_H2, r16	;  > ENV = 0
-	sts	ENV_INTEGR2, r16	; /
-.endif	; USE_INIT_LFO2
-	sts	ADC_CHAN, r16		; ADC_CHAN = 0
-	sts	NOTE_L, r16		; \
-	sts	NOTE_H, r16		;  >
-	sts	NOTE_INTG, r16		; /
-	sts	MIDIPBEND_L, r16	; \
-	sts	MIDIPBEND_H, r16	; / P.BEND = 0
-	sts	MIDIMODWHEEL, r16	; MOD.WHEEL = 0
-	sts	KNOB_SHIFT, r16		; Initialize panel shift switch = 0 (unshifted)
-	sts	VCF_STATUS, r16		; Flag VCF as off (0)
-
-	ldi	r16, 2
-	sts	PORTACNT, r16		; PORTACNT = 2
-
-	ldi	r16, 255
-	sts	POWER_UP, r16		; Set power_up flag to 255 to force first initialization of panel switches
-.if !MEEBLIP_MICRO_V2_04_HW
-	sts	WRITE_MODE, r16		; Patch write mode defaults to "off"
-.endif
-	sts	LPF_I, r16		; no DCF
-	sts	HPF_I, r16
-	sts	MIDINOTE, r16		; note# = 255
-	sts	MIDINOTEPREV, r16	; note# = 255
-
-	ldi	r16, 0x5E		; \
-	ldi	r17, 0xB4		;  \
-	ldi	r18, 0x76		;   \ initialising of
-	sts	SHIFTREG_0, r16		;   / shift register
-	sts	SHIFTREG_1, r17		;  /
-	sts	SHIFTREG_2, r18		; /
-
-;	ldi	r16, 0x5E		; \
-;	ldi	r17, 0xB4		;  \
-;	ldi	r18, 0x76		;   \ initialising of
-	sts	LFSR_0, r16		;   / linear feedback shift register
-	sts	LFSR_1, r17		;  /
-	sts	LFSR_2, r18		; /
-
-	ldi	r16, 0			; \
-	ldi	r17, 0			;  > Amin = 0
-	ldi	r18, 0			; /
-	sts	LFOBOTTOM_0, r16	; \
-	sts	LFOBOTTOM_1, r17	;  > store Amin for LFO
-	sts	LFOBOTTOM_2, r18	; /
-.if USE_MIDI_PWMDEPTH
-	sts	LFO2BOTTOM_0, r16	; \
-	sts	LFO2BOTTOM_1, r17	;  > store Amin for LFO2
-	sts	LFO2BOTTOM_2, r18	; /
-.endif	; USE_MIDI_PWMDEPTH
-
-	ldi	r16, 255		; \
-	ldi	r17, 255		;  > Amax = 255,999
-	ldi	r18, 255		; /
-	sts	LFOTOP_0, r16		; \
-	sts	LFOTOP_1, r17		;  > store Amax for LFO
-	sts	LFOTOP_2, r18		; /
-.if !USE_MIDI_PWMDEPTH
-	ldi	r18, 20
-	sts	LFO2BOTTOM_0, r16	; \
-	sts	LFO2BOTTOM_1, r17	;  > store Amin for LFO2
-	sts	LFO2BOTTOM_2, r18	; /
-
-	ldi	r18, 100
-.endif	; !USE_MIDI_PWMDEPTH
-	sts	LFO2TOP_0, r16		; \
-	sts	LFO2TOP_1, r17		;  > store Amax for LFO2
-	sts	LFO2TOP_2, r18		; /
-
-; initialize sound parameters:
-.if MEEBLIP_MICRO_V2_04_HW
-	clr	r16
-.else
-	ldi	r16, 0
-.endif
-	sts	LFOPHASE, r16
-	sts	LFO2PHASE, r16
-	sts	ENVPHASE, r16
-.if USE_INIT_LFO2
-	sts	ENVPHASE2, r16
-.endif	; USE_INIT_LFO2
-
-	sts	DETUNEB_FRAC, r16	; \
-	sts	DETUNEB_INTG, r16	; / detune = 0
-	sts	LFOLEVEL, r16
-
-	ldi	r16, 128
-	sts	DCOA_LEVEL, r16
-	sts	DCOB_LEVEL, r16
-.if USE_MASTER_VOLUME
-	ldi	r16, $80		; set volume to 0dB, middle of the knob
-	sts	MASTER_VOLUME, r16
-	ldi	r16, 255
-	sts	VOLUME, r16
-	ldi	r16, 1
-	sts	VOLUME_X4, r16
-.endif	; USE_MASTER_VOLUME
-
-; default values for midi cc parameter
-	ldi	r16, 4			; \ Set LFO to slow sweep for PWM modulation
-	sts	LFO2FREQ, r16		; /
-
-	ldi	r16, 128
-	sts	PWMDEPTH, r16
-
-	ldi	r16, 0
-	sts	ATTACKTIME2, r16
-	sts	RELEASETIME2, r16
-	sts	ATTACKTIME, r16
-	sts	RELEASETIME, r16
-
-	ldi	r16, 128
-	sts	DECAYTIME2, r16
-	sts	SUSTAINLEVEL2, r16
-	sts	SUSTAINLEVEL, r16
-	sts	DECAYTIME, r16
-
-	; SW_KNOB_SHIFT = upper
-;	ldi	r16, (1<<SW_KNOB_SHIFT)
-;	sts	PATCH_SWITCH1, r16
-;
-;	ldi	r16, 0x00
-;	sts	PATCH_SWITCH2, r16
-
-	; SW_DCA_MODE = env, SW_MODWHEEL_ENA = on
-	; SW_LFO_KBD_SYNC = on, SW_DCF_KBD_TRACK = on
-	ldi	r16, (1<<SW_DCA_MODE)     | (1<<SW_MODWHEEL_ENA) |\
-		     (1<<SW_LFO_KBD_SYNC) | (1<<SW_DCF_KBD_TRACK)|\
-		     (1<<SW_TRANSPOSE)    | (0<<SW_MIX_RING)
-	sts	PATCH_SWITCH3, r16
-	sts	SW3, r16
-
-	ldi	r16, 0x00
-	sts	PATCH_SWITCH4, r16
-	sts	SW4, r16
-
-;-------------------------
-.if MEEBLIP_MICRO_V2_04_HW
-; initialize port A:
-	ldi	r16, 0x00 		; \
-	out	DDRA, r16		; / PA = iiiiiiii    all inputs (panel pots)
-	ldi	r16, 0xFF		; enable internal pull-ups, even though we're using analog inputs
-	out	PORTA, r16		; / PA = pppppppp
-
-; initialize port B:
-	ldi	r16, 0x00		; \
-	out	DDRB, r16		; / PB = iiiiiiii    all inputs, pull-ups enabled
-	ldi	r16, 0xff		; \
-	out	PORTB, r16		; / PB = pppppppp
-
-; initialize port C:
-	ldi	r16, 0xFF		; \
-	out	DDRC, r16		; / PC = oooooooo    all outputs (DAC)
-	ldi	r16, 0x00		; \
-	out	PORTC, r16		; / PC = 00000000
-
-; initialize port D:
-	ldi	r16, 0x0E		; \ PD = iiiioooi
-	out	DDRD, r16		; / PD0 (MIDI-IN)
-	ldi	r16, 0xFC 		; \
-	out	PORTD, r16		; / PD = 1111110z
-
-;-------------------------
-.else	; MEEBLIP_MICRO_V2_04_HW
-; initialize port A:
-	ldi	r16, 0x00		; \
-	out	PORTA, r16		; / PA = zzzzzzzz
-	ldi	r16, 0x00		; \
-	out	DDRA, r16		; / PA = iiiiiiii    all inputs (panel pots)
-
-; initialize port B:
-.if MEEBLIP_V1_31_HW
-	ldi	r16, 0xFF		; \
-	out	PORTB, r16		; / PB = pppppppp
-	ldi	r16, 0x00		; \
-	out	DDRB, r16		; / PB = iiiiiiii    all inputs
-.else	; MEEBLIP_V1_31_HW
-	ldi	r16, 0xFF		; \
-	out	PORTB, r16		; / PB = pppppppp
-	ldi	r16, 0x40		; \ PB6 MISO = MIDI_LED
-	out	DDRB, r16		; / PB = ioiiiiii    all inputs except PB6 (MIDI-LED)
-.endif	; MEEBLIP_V1_31_HW
-
-; initialize port C:
-	ldi	r16, 0x00		; \
-	out	PORTC, r16		; / PC = 00000000
-	ldi	r16, 0xFF		; \
-	out	DDRC, r16		; / PC = oooooooo    all outputs (DAC)
-
-; initialize port D:
-.if MEEBLIP_V1_31_HW
-	ldi	r16, 0xFC		; \
-	out	PORTD, r16		; / PD = 1111110z
-	ldi	r16, 0xFE		; \
-	out	DDRD, r16		; / PD = oooooooi    all outputs except PD0 (MIDI-IN)
-.else	; MEEBLIP_V1_31_HW
-	ldi	r16, 0xFE		; \
-	out	PORTD, r16		; / PD = 1111111z
-	ldi	r16, 0xFE		; \
-	out	DDRD, r16		; / PD = oooooooi    all outputs except PD0 (MIDI-IN)
-.endif	; MEEBLIP_V1_31_HW
-.endif	; MEEBLIP_MICRO_V2_04_HW
-
-; Turn Power/MIDI LED on at power up
-
-	sbi	PORT_MIDI_LED, MIDI_LED	; LED on
-
-; initialize DAC port pins
-
-	sbi	PORTD, DAC_WR		; Set WR high
-	cbi	PORTD, DAC_AB		; Pull DAC AB port select low
-
-; initialize Timer0:
-	ldi	r16, 0x00		; \
-	out	TCCR0, r16		; / stop Timer 0
-
-; initialize Timer1:
-	ldi	r16, 0x04		; \ prescaler = CK/256
-	out	TCCR1B, r16		; / (clock = 32탎)
-
-; initialize Timer2:
-	ldi	r16, 54			; \
-	out	OCR2, r16		; / OCr2 = 54 gives 36363.63636 Hz sample rate at ~440 cycles per sample loop.
-	ldi	r16, 0x0A		; \ clear timer on compare,
-	out	TCCR2, r16		; / set prescaler = CK/8
-.if USE_UART
-; initialize UART:
-	call	usart_init_default_baudrate	; set baudrate to 38400
-.else	; USE_UART
-	ldi	r16, high((cpu_frequency / (baud_rate * 16)) - 1)
-	out	UBRRH, r16
-	ldi	r16, low((cpu_frequency / (baud_rate * 16)) - 1)
-	out	UBRRL, r16
-
-; enable receiver and receiver interrupt
-	ldi	r16, (1<<RXCIE)|(1<<RXEN)	; \
-	out	UCR, r16			; / RXCIE=1, RXEN=1
-.endif	; USE_UART
-
-; initialize ADC:
-	ldi	r16, 0x86		; \
-	out	ADCSRA, r16		; / ADEN=1, clk = 125 kHz
-
-; initialize interrupts:
-	ldi	r16, 0x80		; \
-	out	TIMSK, r16		; / OCIE2=1
-
-	sei				; Interrupt Enable
-
-; start conversion of the first A/D channel:
-	lds	r18, ADC_CHAN
-	rcall	ADC_START
-
-; store initial pot positions as OLD_ADC values to avoid snapping to new value unless knob has been moved.
-
-	; Store value of Pot ADC0
-	ldi	r28, low(ADC_0)
-	ldi	r29, high(ADC_0)
-	add	r28, r18
-	adc	r29, ZERO
-	rcall	ADC_END			; r16 = AD(i)
-	st	Y, r16			; AD(i) --> ADC_i
-
-	inc	r18			; Now do ADC1
-	rcall	ADC_START		; start conversion of next channel
-	inc	r28
-	rcall	ADC_END			; r16 = AD(i)
-	st	Y, r16			; AD(i) --> ADC_i
-
-	inc	r18			; Now do ADC2
-	rcall	ADC_START		; start conversion of next channel
-	inc	r28
-	rcall	ADC_END			; r16 = AD(i)
-	st	Y, r16			; AD(i) --> ADC_i
-
-	inc	r18			; Now do ADC3
-	rcall	ADC_START		; start conversion of next channel
-	inc	r28
-	rcall	ADC_END			; r16 = AD(i)
-	st	Y, r16			; AD(i) --> ADC_i
-
-	inc	r18			; Now do ADC4
-	rcall	ADC_START		; start conversion of next channel
-	inc	r28
-	rcall	ADC_END			; r16 = AD(i)
-	st	Y, r16			; AD(i) --> ADC_i
-
-	inc	r18			; Now do ADC5
-	rcall	ADC_START		; start conversion of next channel
-	inc		r28
-	rcall	ADC_END			; r16 = AD(i)
-	st	Y, r16			; AD(i) --> ADC_i
-
-	inc	r18			; Now do ADC6
-	rcall	ADC_START		; start conversion of next channel
-	inc	r28
-	rcall	ADC_END			; r16 = AD(i)
-	st	Y, r16			; AD(i) --> ADC_i
-
-	inc	r18			; Now do ADC7
-	rcall	ADC_START		; start conversion of next channel
-	inc	r28
-	rcall	ADC_END			; r16 = AD(i)
-	st	Y, r16			; AD(i) --> ADC_i
-
-	ldi	r18, 0
-	sts	ADC_CHAN, r18
-	rcall	ADC_START		; start conversion of ADC0 for main loop
-
-; Load current patch from eeprom
-
-	ldi	r18, $03
-	ldi	r17, $FE		; Set eeprom address to $03FE (second last byte)
-	rcall	EEPROM_READ		; load current patch number into r16
-	rcall	LOAD_PATCH		; load patch into synthesis engine
-
-; Load MIDI channel from eeprom
-
-	ldi	r18, $03
-	ldi	r17, $FF		; Set eeprom address to $03FF (last byte)
-	rcall	EEPROM_READ		; load MIDI CHANNEL into r16
-	sts	SETMIDICHANNEL, r16
-
-; initialize the keyboard scan time
-	in	r16, TCNT1L		; \
-	in	r17, TCNT1H		; / r17:r16 = TCNT1 = t
-	sts	TPREV_KBD_L, r16
-	sts	TPREV_KBD_H, r17
-.if USE_UART
-	call	usart_startup_message
-
-; print knob parameter values from eeprom to serial port
-	call	usart_print_sound_parameter
-
-; print switch/modeflags status to serial port
-
-; reinitialize UART for midi
-init_uart_midi:
-	sbis	UCSRA, UDRE		; before change the baudrate wait for transmitter ready
-	rjmp	init_uart_midi
-
-	ldi	r16, high((cpu_frequency / (baud_rate * 16)) - 1)
-	out	UBRRH, r16
-	ldi	r16, low((cpu_frequency / (baud_rate * 16)) - 1)
-	out	UBRRL, r16
-
-; enable receiver and receiver interrupt
-	ldi	r16, (1<<RXCIE)|(1<<RXEN)	; \
-	out	UCR, r16			; / RXCIE=1, RXEN=1
-.endif	; USE_UART
-
-;----------------------------------------------------------------------------
+;============================================================================
 ; Main Program Loop
 ;
 ; This is where everything but sound generation happens. This loop is interrupted 36,636 times per second by the
@@ -3586,7 +4206,7 @@ init_uart_midi:
 ;
 ; In its spare time, Main Program Loop likes to go for long walks, listen to classical music and perform
 ; existential bit flipping.
-;----------------------------------------------------------------------------
+;============================================================================
 
 MAINLOOP:
 ; begin:
@@ -3606,7 +4226,7 @@ MAINLOOP:
 	rjmp	MLP_UPDATE		; / skip scanning if (t-t0) < 100ms
 
 MLP_SCAN:
-
+	; do led update and keyboard scan every 100ms
 	; blink LED if midi/save/load button has been pressed
 	lds	r16, SWITCH3		; check if set from a previous scan
 	tst	r16
@@ -3763,173 +4383,260 @@ MLP_SWLOOP:
 ; service:
 ;----------------------------------------------------------------------------
 MLP_SWITCH:
+; r16      SWITCH2..1
+; r17      OLD_SWITCH2..1, changed switch
+; r18      temp
+; r19      OLD_SWITCH2..1
+; r23:r23  PATCH_SWITCH4..1
+; r30      switch number
+; r31      midi cc pram
+
 	; Compare SWITCH1 to OLD_SWITCH1. Skip if unchanged.
 
-	.def	REG_PATCH_SWITCH1 = r18
-	.def	REG_PATCH_SWITCH2 = r19
-	.def	REG_PATCH_SWITCH3 = r20
-	.def	REG_PATCH_SWITCH4 = r21
+	.def	REG_PATCH_SWITCH1 = r20
+	.def	REG_PATCH_SWITCH2 = r21
+	.def	REG_PATCH_SWITCH3 = r22
+	.def	REG_PATCH_SWITCH4 = r23
 
 	; Keep a copy so we know if things change next time
-	lds	r18, PATCH_SWITCH1
-	lds	r19, PATCH_SWITCH2
-	lds	r20, PATCH_SWITCH3
-	lds	r21, PATCH_SWITCH4
+	lds	REG_PATCH_SWITCH1, PATCH_SWITCH1
+	lds	REG_PATCH_SWITCH2, PATCH_SWITCH2
+	lds	REG_PATCH_SWITCH3, PATCH_SWITCH3
+	lds	REG_PATCH_SWITCH4, PATCH_SWITCH4
 
+	clr	r30			; Register used to indicate which switch 1..16 has been flipped
+	clr	r31			; if zero no switch has been changed
 	; Compare SWITCH1 to OLD_SWITCH1. Skip if unchanged.
 	lds	r16, SWITCH1
 	lds	r17, OLD_SWITCH1
-	cp	r16, r17
-	breq	MLP_SWITCH2		; Switch 1 unchanged, so leave as is.
-	sts	OLD_SWITCH1, r16	; Keep a copy of panel switches so we know if things change next time
-
-	; Compare bits in OLD_SWITCH1 and SWITCH1. If different, copy SWITCH1 bit to PATCH_SWITCH1 bit.
-	clr	r30			; Register used to indicate which switch 1..16 has been flipped
+	mov	r19, r17
 	; Perform an exclusive OR on r17 and r16. Changed bits are flagged as 1's.
 	eor	r17, r16
+	brne	MLP_BIT0
+	rjmp	MLP_SWITCH2		; Switch 1 unchanged, so leave as is.
+
+	; Compare bits in OLD_SWITCH1 and SWITCH1. If different, copy SWITCH1 bit to PATCH_SWITCH1 bit.
 MLP_BIT0:
 	sbrs	r17, 0
 	rjmp	MLP_BIT1		; Exit if bit is not set
 	bst	r16, 0			; copy bit from SWITCH1 to PATCH_SWITCH1
+	bld	r19, 0			; update bit in OLD_SWITCH1
 	bld	REG_PATCH_SWITCH1, SW_KNOB_SHIFT
 	; Flag dual parameter knobs unmoved because this is the KNOB_SHIFT switch
 	push	r16
 	rcall	CLEAR_KNOB_STATUS
 	pop	r16
+	ldi	r31, (S_KNOB_SHIFT - MIDICC)
 	ldi	r30, 16			; Flag switch 16 moved
+	rjmp	MLP_SW1_DONE
 MLP_BIT1:
 	sbrs	r17, 1
 	rjmp	MLP_BIT2
 	bst	r16, 1
+	bld	r19, 1			; update bit in OLD_SWITCH1
 .if USE_ORIGINAL_DCO_FM & !USE_TRANSPOSE_SWITCH
 	bld	REG_PATCH_SWITCH1, SW_OSC_FM
+	ldi	r31, (S_OSC_FM - MIDICC)
 .else	; USE_ORIGINAL_DCO_FM & !USE_TRANSPOSE_SWITCH
 	bld	REG_PATCH_SWITCH3, SW_TRANSPOSE
+	ldi	r31, (S_TRANSPOSE - MIDICC)
 .endif	; USE_ORIGINAL_DCO_FM & !USE_TRANSPOSE_SWITCH
 	ldi	r30, 15			; Flag switch 15 moved
+	rjmp	MLP_SW1_DONE
 MLP_BIT2:
 	sbrs	r17, 2
 	rjmp	MLP_BIT3
 	bst	r16, 2
+	bld	r19, 2			; update bit in OLD_SWITCH1
 	bld	REG_PATCH_SWITCH1, SW_LFO_RANDOM
+	ldi	r31, (S_LFO_RANDOM - MIDICC)
 	ldi	r30, 14			; Flag switch 14 moved
+	rjmp	MLP_SW1_DONE
 MLP_BIT3:
 	sbrs	r17, 3
 	rjmp	MLP_BIT4
 	bst	r16, 3
+	bld	r19, 3			; update bit in OLD_SWITCH1
 	bld	REG_PATCH_SWITCH1, SW_LFO_WAVE
+	ldi	r31, (S_LFO_WAVE - MIDICC)
 	ldi	r30, 13			; Flag switch 13 moved
+	rjmp	MLP_SW1_DONE
 MLP_BIT4:
 	sbrs	r17, 4
 	rjmp	MLP_BIT5
 	bst	r16, 4
+	bld	r19, 4			; update bit in OLD_SWITCH1
+.if !USE_ARPEGGIATOR
 	bld	REG_PATCH_SWITCH1, SW_FILTER_MODE
+	ldi	r31, (S_FILTER_MODE - MIDICC)
+.else	; !USE_ARPEGGIATOR
+	bld	REG_PATCH_SWITCH4, SW_ARP_ENABLE
+	ldi	r31, (S_ARP_ENABLE - MIDICC)
+.endif	; !USE_ARPEGGIATOR
 	ldi	r30, 8			; Flag switch 8 moved
+	rjmp	MLP_SW1_DONE
 MLP_BIT5:
 	sbrs	r17, 5
 	rjmp	MLP_BIT6
 	bst	r16, 5
+	bld	r19, 5			; update bit in OLD_SWITCH1
+.if !USE_ARPEGGIATOR
 	bld	REG_PATCH_SWITCH1, SW_DISTORTION
+	ldi	r31, (S_DISTORTION - MIDICC)
+.else	; !USE_ARPEGGIATOR
+	bld	REG_PATCH_SWITCH4, SW_ARP_REPEAT
+	ldi	r31, (S_ARP_REPEAT - MIDICC)
+.endif	; !USE_ARPEGGIATOR
 	ldi	r30, 7			; Flag switch 7 moved
+	rjmp	MLP_SW1_DONE
 MLP_BIT6:
 	sbrs	r17, 6
 	rjmp	MLP_BIT7
 	bst	r16, 6
+	bld	r19, 6			; update bit in OLD_SWITCH1
+.if !USE_ARPEGGIATOR
 	bld	REG_PATCH_SWITCH1, SW_LFO_ENABLE
+	ldi	r31, (S_LFO_ENABLE - MIDICC)
+.else	; !USE_ARPEGGIATOR
+	bld	REG_PATCH_SWITCH1, SW_DISTORTION
+	ldi	r31, (S_DISTORTION - MIDICC)
+.endif	; !USE_ARPEGGIATOR
 	ldi	r30, 6			; Flag switch 6 moved
+	rjmp	MLP_SW1_DONE
 MLP_BIT7:
 	sbrs	r17, 7
-	rjmp	MLP_PATCH1SAVE
+	rjmp	MLP_SW_LEAVE
 	bst	r16, 7
+	bld	r19, 7			; update bit in OLD_SWITCH1
 	bld	REG_PATCH_SWITCH1, SW_LFO_DEST
+	ldi	r31, (S_LFO_DEST - MIDICC)
 	ldi	r30, 5			; Flag switch 5 moved
-
-MLP_PATCH1SAVE:
-	sts	CONTROL_SWITCH, r30	; Number of last switch flipped: 1..16, where zero indicates none flipped
+MLP_SW1_DONE:
+	sts	OLD_SWITCH1, r19	; Keep a copy of panel switches so we know if things change next time
+	; T flag is valid
 	rjmp	MLP_SW_LEAVE
 
 MLP_SWITCH2:
-; Compare SWITCH2 to OLD_SWITCH2. Skip if unchanged.
-
+	; Compare SWITCH2 to OLD_SWITCH2. Skip if unchanged.
 	lds	r16, SWITCH2
 	lds	r17, OLD_SWITCH2
-	cp	r16, r17
-	breq	MLP_SW_LEAVE		; Switch 2 unchanged, so leave as is.
-	sts	OLD_SWITCH2, r16	; Keep a copy of panel switches so we know if things change next time
-
-	; Compare bits in OLD_SWITCH2 and SWITCH2. If different,
-	; copy SWITCH2 bit to PATCH_SWITCH2 bit.
-	clr	r30			; Register used to indicate which switch 1..16 has been flipped
-
+	mov	r19, r17
 	; Perform an exclusive OR on r17 and r16. Changed bits are flagged as 1's.
 	eor	r17, r16
+	brne	MLP_BIT0A
+	rjmp	MLP_SW_LEAVE		; Switch 2 unchanged, so leave as is.
+
+	; Compare bits in OLD_SWITCH2 and SWITCH2. If different,
 MLP_BIT0A:
 	sbrs	r17, 0
 	rjmp	MLP_BIT1A		; Exit if bit is not set
 	bst	r16, 0			; copy bit from SWITCH2 to PATCH_SWITCHx
+	bld	r19, 0			; update bit in OLD_SWITCH2
 .if USE_ORIGINAL_RAW_OSC & !USE_RINGMODULATOR
 	bld	REG_PATCH_SWITCH2, SW_ANTI_ALIAS
+	ldi	r31, (S_ANTI_ALIAS - MIDICC)
 .else	; USE_ORIGINAL_RAW_OSC & !USE_RINGMODULATOR
 	bld	REG_PATCH_SWITCH3, SW_MIX_RING
+	ldi	r31, (S_MIX_RING - MIDICC)
 .endif	; USE_ORIGINAL_RAW_OSC & !USE_RINGMODULATOR
 	ldi	r30, 12			; Flag switch 12 moved
+	rjmp	MLP_SW2_DONE
 MLP_BIT1A:
 	sbrs	r17, 1
 	rjmp	MLP_BIT2A
 	bst	r16, 1
+	bld	r19, 1			; update bit in OLD_SWITCH2
 	bld	REG_PATCH_SWITCH2, SW_OSCB_OCT
+	ldi	r31, (S_OSCB_OCT - MIDICC)
 	ldi	r30, 11			; Flag switch 11 moved
+	rjmp	MLP_SW2_DONE
 MLP_BIT2A:
 	sbrs	r17, 2
 	rjmp	MLP_BIT3A
 	bst	r16, 2
+	bld	r19, 2			; update bit in OLD_SWITCH2
 	bld	REG_PATCH_SWITCH2, SW_OSCB_ENABLE
+	ldi	r31, (S_OSCB_ENABLE - MIDICC)
 	ldi	r30, 10			; Flag switch 10 moved
+	rjmp	MLP_SW2_DONE
 MLP_BIT3A:
 	sbrs	r17, 3
 	rjmp	MLP_BIT4A
 	bst	r16, 3
+	bld	r19, 3			; update bit in OLD_SWITCH2
 	bld	REG_PATCH_SWITCH2, SW_OSCB_WAVE
+	ldi	r31, (S_OSCB_WAVE - MIDICC)
 	ldi	r30, 9			; Flag switch 9 moved
+	rjmp	MLP_SW2_DONE
 MLP_BIT4A:
 	sbrs	r17, 4
 	rjmp	MLP_BIT5A
 	bst	r16, 4
+	bld	r19, 4			; update bit in OLD_SWITCH2
 	bld	REG_PATCH_SWITCH2, SW_SUSTAIN
+	ldi	r31, (S_SUSTAIN - MIDICC)
 	ldi	r30, 4			; Flag switch 4 moved
 ; set update_env_dca & update_env_dcf flags
 	lds	r22, MIDI_TASK_UPDATE
 	ori	r22, (1<<UPDATE_ENV_DCF) | (1<< UPDATE_ENV_DCA)
 	sts	MIDI_TASK_UPDATE, r22
-
+	rjmp	MLP_SW2_DONE
 MLP_BIT5A:
 	sbrs	r17, 5
 	rjmp	MLP_BIT6A
 	bst	r16, 5
+	bld	r19, 5			; update bit in OLD_SWITCH2
 	bld	REG_PATCH_SWITCH2, SW_OSCA_NOISE
+	ldi	r31, (S_OSCA_NOISE - MIDICC)
 	ldi	r30, 3			; Flag switch 3 moved
+	rjmp	MLP_SW2_DONE
 MLP_BIT6A:
 	sbrs	r17, 6
 	rjmp	MLP_BIT7A
 	bst	r16, 6
+	bld	r19, 6			; update bit in OLD_SWITCH2
 	bld	REG_PATCH_SWITCH2, SW_PWM_SWEEP
+	ldi	r31, (S_PWM_SWEEP - MIDICC)
 	ldi	r30, 2			; Flag switch 2 moved
+	rjmp	MLP_SW2_DONE
 MLP_BIT7A:
 	sbrs	r17, 7
-	rjmp	MLP_PATCH2SAVE
+	rjmp	MLP_SW_LEAVE
 	bst	r16, 7
+	bld	r19, 7			; update bit in OLD_SWITCH2
 	bld	REG_PATCH_SWITCH2, SW_OSCA_WAVE
+	ldi	r31, (S_OSCA_WAVE - MIDICC)
 	ldi	r30, 1			; Flag switch 1 moved
-
-MLP_PATCH2SAVE:
-	sts	CONTROL_SWITCH, r30	; Number of last switch flipped: 1..16, where zero indicates none flipped
+MLP_SW2_DONE:
+	sts	OLD_SWITCH2, r19	; Keep a copy of panel switches so we know if things change next time
 
 MLP_SW_LEAVE:
+	sts	CONTROL_SWITCH, r30	; Number of last switch flipped: 1..16, where zero indicates none flipped
+
 	; DON'T save changes to PATCH_SWITCH if BUTTON_STATUS is SAVE (2) because
 	;   we're about to write the patch that has just been changed by flipping the switch.
 	lds	r17, BUTTON_STATUS
 	tst	r17
-	brne	MLP_SW_DOBTN		; skip saving PATCH_SWITCH, proces the button pressed
+	brne	MLP_SW_DOBTN		; skip saving PATCH_SWITCH, process the button pressed
+
+.if USE_MIDI_OUT
+	; T flag is valid, CC value
+	; r30  Number of last switch flipped: 1..16
+	; r31  CC param. if 0: no change, skip midi out
+	tst	r31
+	breq	MLP_MIDI_SKIP
+
+	mov	r16, r31
+	; send switch change as midi cc message
+	; r16 cc param
+	; r17 cc value
+	ldi	r17, 0 		; send midi value for switch is off
+	brtc	MLP_MIDI_0	; T flag hold cc value
+	ldi	r17, 127 	; send midi value for switch is on
+MLP_MIDI_0:
+	rcall	send_midi_cc
+MLP_MIDI_SKIP:
+.endif	; USE_MIDI_OUT
 
 	; Store changes	to patch
 	sts	PATCH_SWITCH1, REG_PATCH_SWITCH1	; Store changes
@@ -3937,12 +4644,37 @@ MLP_SW_LEAVE:
 	sts	PATCH_SWITCH3, REG_PATCH_SWITCH3	; Store changes
 	sts	PATCH_SWITCH4, REG_PATCH_SWITCH4	; Store changes
 
-	.undef	REG_PATCH_SWITCH1	; r18
-	.undef	REG_PATCH_SWITCH2	; r19
-	.undef	REG_PATCH_SWITCH3	; r20
-	.undef	REG_PATCH_SWITCH4	; r21
+	.undef	REG_PATCH_SWITCH1	; r20
+	.undef	REG_PATCH_SWITCH2	; r21
+	.undef	REG_PATCH_SWITCH3	; r22
+	.undef	REG_PATCH_SWITCH4	; r23
 
 	rjmp	SKIP_CONTROL_SET
+
+; +----------------+-------+-----------------------------+
+; | Button pressed |       |                             |
+; | Midi Save Load | Index | Action                      |
+; +----------------+-------+-----------------------------+
+; |   O    -    -  |   1   | Set Midi channel            |
+; |   -    O    -  |   2   | Save patch to eeprom        |
+; |   -    -    O  |   4   | Load patch from eeprom      |
+; |   O    O    -  |   3   | Extended Function Group 1   |
+; |   O    -    O  |   5   | Extended Function Group 2   |
+; |   -    O    O  |   6   | Extended Function Group 3   |
+; |   O    O    O  |   7   |   -- not used --            |
+; +----------------+-------+-----------------------------+
+
+; +------------------------------------------------------+
+; | Extended Function Group 1                            |
+; +--------+---------------------------------------------+
+; | Switch | Operation                                   |
+; +--------+---------------------------------------------+
+; |    1   | Dump sound parameter to serial output       |
+; |    2   | disable output of changed buttons and knobs |
+; |    3   | enable midi cc output                       |
+; |    4   | enable debug output                         |
+; +--------+---------------------------------------------+
+
 
 MLP_SW_DOBTN:
 ; Set MIDI channel based on panel switches:
@@ -3996,7 +4728,7 @@ MLP_SAVE_1:
 .endif	; USE_READ_ONLY_PATCH_ZERO
 	lds	r17, WRITE_MODE
 	tst	r17
-	breq	END_CONTROL_SET		; Skip if we're already in write mode
+	breq	END_CONTROL_SET_1	; Skip if we're already in write mode
 	dec	r16			; Shift patch offset to 0..15
 	ldi	r18, $03
 	ldi	r17, $FE		; Set eeprom address to $03FE (second last byte in memory)
@@ -4032,6 +4764,7 @@ MLP_SAVE_1:
 	sts	SW4, r16		; Copy the patch switches into the MIDI CC table
 
 	rcall	CLEAR_KNOB_STATUS
+END_CONTROL_SET_1:
 	rjmp	END_CONTROL_SET		; reset control button
 
 SET_MIDI_CH_1:
@@ -4047,17 +4780,55 @@ NOT_OMNI:
 	ldi	r17, $FF		; Set eeprom address to $03FF (last byte in memory)
 	rcall	EEPROM_WRITE		; Write midi channel# (r16) to eeprom
 	rjmp	END_CONTROL_SET
+
+;----------------------------------------------------------------------------
 MLP_EXTFUNC_1:
 	cpi	r16, 1
-	brne	MLP_EXTFUNC_1_0
-.if USE_UART
-	call	debug_entry
-	call	usart_print_sound_parameter
-	call	debug_exit
-.endif	; USE_UART
-MLP_EXTFUNC_1_0:
+	brne	MLP_EXTFUNC_1_1
+.if USE_DEBUG_OUT
+	rcall	debug_entry		; open for send sound parameter
+	call	print_sound_parameter
+	rcall	debug_exit
+.endif	; USE_DEBUG_OUT
+	rjmp	END_CONTROL_SET
+MLP_EXTFUNC_1_1:
 
+	cpi	r16, 2
+	brne	MLP_EXTFUNC_1_2
+	; disable button and knob change output
+ 	lds	r16, CONTROL_STATE
+ 	andi	r16, ~((1<<ENABLE_MIDI_CC_OUT) | (1<<ENABLE_DEBUG_OUT))
+ 	sts	CONTROL_STATE, r16
+	rjmp	END_CONTROL_SET
+MLP_EXTFUNC_1_2:
+
+	cpi	r16, 3
+	brne	MLP_EXTFUNC_1_3
+	; enable midi cc output
+ 	lds	r16, CONTROL_STATE
+ 	ori	r16, (1<<ENABLE_MIDI_CC_OUT)
+ 	andi	r16, ~(1<<ENABLE_DEBUG_OUT)
+ 	sts	CONTROL_STATE, r16
+	rjmp	END_CONTROL_SET
+MLP_EXTFUNC_1_3:
+
+	cpi	r16, 4
+	brne	MLP_EXTFUNC_1_4
+	; enable debug output
+ 	lds	r16, CONTROL_STATE
+ 	ori	r16, (1<<ENABLE_DEBUG_OUT)
+ 	andi	r16, ~(1<<ENABLE_MIDI_CC_OUT)
+ 	sts	CONTROL_STATE, r16
+	rjmp	END_CONTROL_SET
+MLP_EXTFUNC_1_4:
+
+	rjmp	END_CONTROL_SET
+
+;----------------------------------------------------------------------------
 MLP_EXTFUNC_2:				; more extended function not implemented
+	rjmp	END_CONTROL_SET
+
+;----------------------------------------------------------------------------
 MLP_EXTFUNC_3:
 
 END_CONTROL_SET:
@@ -4172,9 +4943,9 @@ MLP_WRITE:
 	lds	r18, WRITE_OFFSET	; r18 contains the byte offset in the patch
 
 ; map           eeprom address ->  midi cc address
-; meeblip midi cc	 0..0F -> 30..3F
-; midi cc extentions	10..1F -> 0E..1D
-; switches SW1..SW4	20..23 -> 2C..2F
+; meeblip midi cc	 0..0F -> 30..3F	classic knobs
+; midi cc extentions	10..1F -> 0E..1D	extended sliders & knobs
+; switches SW1..SW4	20..23 -> 2C..2F	switches
 
 	; setup start address of midi cc parameter
 	ldi	r17, $30		; first block	 0..0F -> 30..3F
@@ -4245,7 +5016,7 @@ MLP_SKIPSCAN:
 	rcall	ADC_END			; r16 = AD(i)
 	lds	r18, ADC_CHAN
 	sts	PREV_ADC_CHAN, r18	; keep track of which ADC channel we're processing.
-	ldi	r28, low(ADC_0)
+	ldi	r28, low(ADC_0)		; save current adc value
 	ldi	r29, high(ADC_0)
 	add	r28, r18
 	adc	r29, ZERO
@@ -4272,6 +5043,10 @@ MLP_SKIPSCAN:
 ;----------------------------------------------------------------------------
 ;
 ; First process the unshifted pots (0, 1, 6, 7)
+; r16 the new pot value
+; r17 1 if the pot has changed, 0 otherwise
+; r20 the current conversion channel (0..7)
+; r16-r20, r28, r29, SREG used by POT_SCAN
 
 	lds	r20, PREV_ADC_CHAN	; Only process the most recently scanned pot, store ADC channel 0..7 in r20
 
@@ -4280,20 +5055,26 @@ CHECK_0:
 	brne	CHECK_1
 	rcall	POT_SCAN		; If so, check if parameter should be updated with pot value in r16
 	tst	r17
-	breq	EXIT_CHECK_0		; Skip update if pot hasn't been updated
+	breq	EXIT_KNOBA		; Skip update if pot hasn't been updated
 	sts	RESONANCE, r16
-EXIT_CHECK_0:
-	rjmp	DONE_KNOBS
+	ldi	r20, (RESONANCE - MIDICC)
+	rjmp	MIDI_KNOBS
 
 CHECK_1:
 	cpi	r20, 1			; Update knob 1 - filter cutoff?
+.if !USE_ARPEGGIATOR
 	brne	CHECK_6
+.else ; !USE_ARPEGGIATOR
+	brne	KNOB_SHIFT_CHECK
+.endif ; !USE_ARPEGGIATOR
 	rcall	POT_SCAN		; If so, check if parameter should be updated with pot value in r16
 	tst	r17
 	breq	EXIT_KNOBA		; Skip update if pot hasn't been updated
 	sts	CUTOFF, r16
-	rjmp	DONE_KNOBS
+	ldi	r20, (CUTOFF - MIDICC)
+	rjmp	MIDI_KNOBS
 
+.if !USE_ARPEGGIATOR
 CHECK_6:
 	cpi	r20, 6			; Update knob 6, PWM?
 	brne	CHECK_7
@@ -4302,19 +5083,21 @@ CHECK_6:
 	breq	EXIT_CHECK_6		; Skip update if pot hasn't been updated
 	sts	PULSE_KNOB, r16		; sync with LFO2FREQ
 	sts	LFO2FREQ, r16
-
+	ldi	r20, (PULSE_KNOB - MIDICC)
 EXIT_CHECK_6:
 	; Store limited PULSE_WIDTH values
-	lds	r16, PULSE_KNOB		; grab the patch value, just in case it hasn't been updated
-	lsr	r16			; Divide it by two (we only need 0-50% pulse)
-	cpi	r16, 4
+	lds	r18, PULSE_KNOB		; grab the patch value, just in case it hasn't been updated
+	lsr	r18			; Divide it by two (we only need 0-50% pulse)
+	cpi	r18, 4
 	brlo	LIMIT_PWM2
 	rjmp	LIMIT_PWM3
 LIMIT_PWM2:
-	ldi	r16, 4
+	ldi	r18, 4
 LIMIT_PWM3:
-	sts	PULSE_KNOB_LIMITED, r16
-	rjmp	DONE_KNOBS
+	sts	PULSE_KNOB_LIMITED, r18
+	tst	r17
+	breq	EXIT_KNOBA
+	rjmp	MIDI_KNOBS
 
 CHECK_7:
 	cpi	r20, 7			; Update knob 7, OSC Detune?
@@ -4323,15 +5106,26 @@ CHECK_7:
 	tst	r17
 	breq	EXIT_CHECK7		; Skip update if pot hasn't been updated
 	sts	OSC_DETUNE, r16
+	ldi	r20, (OSC_DETUNE - MIDICC)
 EXIT_CHECK7:
+	push	r16
+	push	r17
+	push	r20
 	lds	r16, OSC_DETUNE		; grab the patch value, just in case it hasn't been updated
 	rcall	NONLINPOT		; AD6.1 --> DCO B detune with non-linear knob (center is tuned)
 	subi	r17, 128		; -128..+127 Sign detune
 	sts	DETUNEB_FRAC, r16	; Value -128.000..+127.996
 	sts	DETUNEB_INTG, r17
+	pop	r20
+	pop	r17
+	pop	r16
+	tst	r17
+	breq	EXIT_KNOBA
+	rjmp	MIDI_KNOBS
+.endif	; !USE_ARPEGGIATOR
+
 EXIT_KNOBA:
 	rjmp	DONE_KNOBS
-
 
 KNOB_SHIFT_CHECK:
 
@@ -4352,7 +5146,8 @@ KNOB_SHIFT_CHECK:
 	tst	r17
 	breq	EXIT_KNOBB		; Skip update if pot hasn't been updated
 	sts	LFOFREQ, r16
-	rjmp	DONE_KNOBS
+	ldi	r20, (LFOFREQ - MIDICC)
+	rjmp	MIDI_KNOBS
 
 CHECK_3:
 	cpi	r20, 3			; Update knob 3, LFO depth?
@@ -4362,7 +5157,8 @@ CHECK_3:
 	breq	EXIT_KNOBB		; Skip update if pot hasn't been updated
 	sts	LFOLEVEL, r16
 	sts	PANEL_LFOLEVEL, r16
-	rjmp	DONE_KNOBS
+	ldi	r20, (PANEL_LFOLEVEL - MIDICC)
+	rjmp	MIDI_KNOBS
 
 CHECK_4:
 	cpi	r20, 4			; Update knob 4, Filter envelope amount?
@@ -4371,11 +5167,16 @@ CHECK_4:
 	tst	r17
 	breq	EXIT_KNOBB		; Skip update if pot hasn't been updated
 	sts	VCFENVMOD, r16
-	rjmp	DONE_KNOBS
+	ldi	r20, (VCFENVMOD - MIDICC)
+	rjmp	MIDI_KNOBS
 
 CHECK_5:
 	cpi	r20, 5			; Update knob 5, Glide/Portamento?
+.if !USE_ARPEGGIATOR
 	brne	EXIT_KNOBB
+.else ; !USE_ARPEGGIATOR
+	brne	CHECK_6
+.endif ; !USE_ARPEGGIATOR
 	rcall	POT_SCAN		; If so, check if parameter should be updated with pot value in r16
 	tst	r17
 	breq	EXIT_KNOBB		; Skip update if pot hasn't been updated
@@ -4384,8 +5185,63 @@ CHECK_5:
 	lsr	r17			; 25% of original =
 	add	r16, r17		; 75% of original
 	sts	PORTAMENTO, r16
+	ldi	r20, (PORTAMENTO - MIDICC)
+	rjmp	MIDI_KNOBS
+
 EXIT_KNOBB:
 	rjmp	DONE_KNOBS
+
+.if USE_ARPEGGIATOR
+CHECK_6:
+	cpi	r20, 6			; Update knob 6, PWM?
+	brne	CHECK_7
+	rcall	POT_SCAN		; If so, check if parameter should be updated with pot value in r16
+	tst	r17
+	breq	EXIT_CHECK_6		; Skip update if pot hasn't been updated
+	sts	PULSE_KNOB, r16		; sync with LFO2FREQ
+	sts	LFO2FREQ, r16
+	ldi	r20, (PULSE_KNOB - MIDICC)
+EXIT_CHECK_6:
+	; Store limited PULSE_WIDTH values
+	lds	r18, PULSE_KNOB		; grab the patch value, just in case it hasn't been updated
+	lsr	r18			; Divide it by two (we only need 0-50% pulse)
+	cpi	r18, 4
+	brlo	LIMIT_PWM2
+	rjmp	LIMIT_PWM3
+LIMIT_PWM2:
+	ldi	r18, 4
+LIMIT_PWM3:
+	sts	PULSE_KNOB_LIMITED, r18
+	tst	r17
+	breq	EXIT_KNOBB
+	rjmp	MIDI_KNOBS
+
+CHECK_7:
+	cpi	r20, 7			; Update knob 7, OSC Detune?
+	brne	EXIT_KNOBB
+	rcall	POT_SCAN		; If so, check if parameter should be updated with pot value in r16
+	tst	r17
+	breq	EXIT_CHECK7		; Skip update if pot hasn't been updated
+	sts	OSC_DETUNE, r16
+	ldi	r20, (OSC_DETUNE - MIDICC)
+EXIT_CHECK7:
+	push	r16
+	push	r17
+	push	r20
+	lds	r16, OSC_DETUNE		; grab the patch value, just in case it hasn't been updated
+	rcall	NONLINPOT		; AD6.1 --> DCO B detune with non-linear knob (center is tuned)
+	subi	r17, 128		; -128..+127 Sign detune
+	sts	DETUNEB_FRAC, r16	; Value -128.000..+127.996
+	sts	DETUNEB_INTG, r17
+	pop	r20
+	pop	r17
+	pop	r16
+	tst	r17
+	breq	EXIT_KNOBB
+	rjmp	MIDI_KNOBS
+
+.endif	; USE_ARPEGGIATOR
+
 ;----------------------------------------------------------------------------
 ; KNOB BANK 1
 ;----------------------------------------------------------------------------
@@ -4396,13 +5252,20 @@ CHECK_2A:
 	brne	CHECK_3A
 	rcall	POT_SCAN		; If so, check if parameter should be updated with pot value in r16
 	tst	r17
+.if !USE_ARPEGGIATOR
 	breq	DONE_KNOBS		; Skip update if pot hasn't been updated
-	sts	KNOB_DCF_DECAY, r16
-; set update_env_dcf flags
-	lds	r16, MIDI_TASK_UPDATE
-	ori	r16, (1<<UPDATE_ENV_DCF)
-	sts	MIDI_TASK_UPDATE, r16
+.else ; !USE_ARPEGGIATOR
+	brne	CHECK_2A1		; need a long jump to DONE_KNOBS
 	rjmp	DONE_KNOBS
+CHECK_2A1:
+.endif ; !USE_ARPEGGIATOR
+	sts	KNOB_DCF_DECAY, r16
+	ldi	r20, (KNOB_DCF_DECAY - MIDICC)
+; set update_env_dcf flags
+	lds	r18, MIDI_TASK_UPDATE
+	ori	r18, (1<<UPDATE_ENV_DCF)
+	sts	MIDI_TASK_UPDATE, r18
+	rjmp	MIDI_KNOBS
 
 CHECK_3A:
 	cpi	r20, 3			; Update knob 3^, Filter attack?
@@ -4412,7 +5275,8 @@ CHECK_3A:
 	breq	DONE_KNOBS		; Skip update if pot hasn't been updated
 	sts	KNOB_DCF_ATTACK, r16	; sync with ATTACKTIME2
 	sts	ATTACKTIME2, r16
-	rjmp	DONE_KNOBS
+	ldi	r20, (KNOB_DCF_ATTACK - MIDICC)
+	rjmp	MIDI_KNOBS
 
 CHECK_4A:
 	cpi	r20, 4			; Update knob 4^, Amplitude decay?
@@ -4421,21 +5285,61 @@ CHECK_4A:
 	tst	r17
 	breq	DONE_KNOBS		; Skip update if pot hasn't been updated
 	sts	KNOB_AMP_DECAY, r16
+	ldi	r20, (KNOB_AMP_DECAY - MIDICC)
 ; set update_env_dca flags
-	lds	r16, MIDI_TASK_UPDATE
-	ori	r16, (1<<UPDATE_ENV_DCA)
-	sts	MIDI_TASK_UPDATE, r16
-	rjmp	DONE_KNOBS
+	lds	r18, MIDI_TASK_UPDATE
+	ori	r18, (1<<UPDATE_ENV_DCA)
+	sts	MIDI_TASK_UPDATE, r18
+	rjmp	MIDI_KNOBS
 
 CHECK_5A:
 	cpi	r20, 5			; Update knob 5^, Amplitude attack?
+.if !USE_ARPEGGIATOR
 	brne	DONE_KNOBS
+.else ; !USE_ARPEGGIATOR
+	brne	CHECK_6A
+.endif ; !USE_ARPEGGIATOR
 	rcall	POT_SCAN		; If so, check if parameter should be updated with pot value in r16
 	tst	r17
 	breq	DONE_KNOBS		; Skip update if pot hasn't been updated
 	sts	KNOB_AMP_ATTACK, r16	; sync with ATTACKTIME
 	sts	ATTACKTIME, r16
+	ldi	r20, (KNOB_AMP_ATTACK - MIDICC)
 
+.if USE_ARPEGGIATOR
+	rjmp	MIDI_KNOBS
+
+CHECK_6A:
+	cpi	r20, 6			; Update knob 6^, arp threshold?
+	brne	CHECK_7A
+	rcall	POT_SCAN		; If so, check if parameter should be updated with pot value in r16
+	tst	r17
+	breq	DONE_KNOBS		; Skip update if pot hasn't been updated
+	sts	ARP_THRESHOLD, r16
+	ldi	r20, (ARP_THRESHOLD - MIDICC)
+	rjmp	MIDI_KNOBS
+
+CHECK_7A:
+	cpi	r20, 7			; Update knob 7^, arp rate?
+	brne	DONE_KNOBS
+	rcall	POT_SCAN		; If so, check if parameter should be updated with pot value in r16
+	tst	r17
+	breq	DONE_KNOBS		; Skip update if pot hasn't been updated
+	sts	ARP_RATE, r16
+	ldi	r20, (ARP_RATE - MIDICC)
+.endif	; USE_ARPEGGIATOR
+
+MIDI_KNOBS:
+.if USE_MIDI_OUT
+; send knobs changes to midi
+; r17 1 if the pot has changed, 0 otherwise
+; r16 the new pot value (midi cc value)
+; r20 midi cc param
+	mov	r17, r16	;  r17 cc value (0..255)
+	lsr	r17		; (0..127)
+	mov	r16, r20	;  r16 cc param
+	rcall	send_midi_cc
+.endif	; USE_MIDI_OUT
 DONE_KNOBS:
 
 ;----------------------------------------------------------------------------
@@ -4447,7 +5351,7 @@ MIDI_VELOCITY:
 	lds	R17, MIDIVELOCITY	; Value is 0..127
 	lsl	R17			; 0..254
 	lds	r16, VCFENVMOD		; direct value from knob/midi 0..255
-	subi	r16, 0x80		; -128..+127 Sign vcf envelop modulation
+	subi	r16, 0x80		; -128..+127 Sign vcf envelope modulation
 	mulsu	r16, r17		; => r1:r0
 	lds	r22, PATCH_SWITCH3
 	sbrc	r22, SW_VELOCITY
@@ -4535,7 +5439,7 @@ MLP_LFOBOTTOM:
 	mov	r19, r22		; \
 	mov	r20, r23		;  > A = Amin
 	mov	r21, r24		; /
-	ldi	r30, 0			; begin of rising
+	ldi	r30, LFOPHASE_RISE	; begin of rising
 	ldi	r31, 1			; flag = 1 (Amin underflow)
 
 MLP_LFOX:
@@ -4548,11 +5452,11 @@ MLP_LFOX:
 ; switch norm/rand:
 ; determine Amin i Amax:
 	ldi	r16, 0			; \
-	ldi	r17, 0			;  > Amin when not LFO==tri
-	ldi	r18, 0			; /  and not LFO==rand
+	ldi	r17, 0			;  > Amin when LFO==tri
+	ldi	r18, 0			; /
 	lds	r30, PATCH_SWITCH1
 	sbrs	r30, SW_LFO_RANDOM	; LFO random if switch is set
-	RJMP	MLP_LFOAWR		; random switch not set
+	rjmp	MLP_LFOAWR		; random switch not set
 	tst	r31			; test for over/underflow
 	breq	MLP_LFOAX
 	lds	r16, SHIFTREG_0		; \
@@ -4561,13 +5465,13 @@ MLP_LFOX:
 	andi	r18, 0x7F		; /
 
 MLP_LFOAWR:
-; store Amin, Amax values for squ and rand
+	; store Amin, Amax values
 	sts	LFOBOTTOM_0, r16	; \
 	sts	LFOBOTTOM_1, r17	;  > store Amin
 	sts	LFOBOTTOM_2, r18	; /
 	com	r16			; \
 	com	r17			;  > Amax = 255,999 - Amin
-	com	r18			; /	128,000..255,999
+	com	r18			; /         128,000..255,999
 	sts	LFOTOP_0, r16		; \
 	sts	LFOTOP_1, r17		;  > store Amax
 	sts	LFOTOP_2, r18		; /
@@ -4690,11 +5594,11 @@ MLP_LFO2X:
 ; switch norm/rand:
 ; determine Amin i Amax:
 	ldi	r16, 0			; \
-	ldi	r17, 0			;  > Amin when not LFO==tri
-	ldi	r18, 0			; /  and not LFO==rand
+	ldi	r17, 0			;  > Amin when LFO==tri
+	ldi	r18, 0			; /
 	lds	r30, PATCH_SWITCH4
 	sbrs	r30, SW_LFO2_RANDOM	; LFO random if switch is set
-	RJMP	MLP_LFO2AWR
+	rjmp	MLP_LFO2AWR
 	tst	r31			; test for over/underflow
 	breq	MLP_LFO2AX		; branch on not over- or underflow
 	lds	r16, SHIFTREG_0		; \
@@ -4703,13 +5607,13 @@ MLP_LFO2X:
 	andi	r18, 0x7F		; /
 
 MLP_LFO2AWR:
-; store Amin, Amax values for squ and rand
+	; store Amin, Amax values
 	sts	LFO2BOTTOM_0, r16	; \
 	sts	LFO2BOTTOM_1, r17	;  > store Amin
 	sts	LFO2BOTTOM_2, r18	; /
 	com	r16			; \
 	com	r17			;  > Amax = 255,999 - Amin
-	com	r18			; /	128,000..255,999
+	com	r18			; /         128,000..255,999
 	sts	LFO2TOP_0, r16		; \
 	sts	LFO2TOP_1, r17		;  > store Amax
 	sts	LFO2TOP_2, r18		; /
@@ -4764,21 +5668,22 @@ MLP_LFO2NWR:
 	;--------------------------------------------------------------------
 	; ENV: (DCA)
 	;--------------------------------------------------------------------
+
 ; check envelope phase:
 	lds	r17, ENVPHASE
 	lds	r16, ATTACKTIME		; copy of KNOB_AMP_ATTACK
 
 MLP_PHASE:
-	cpi	r17, 1
+	cpi	r17, ENV_ATTACK
 	breq	MLP_ENVAR		; when "attack"
 	lds	r16, DECAYTIME
-	cpi	r17, 2
+	cpi	r17, ENV_DECAY
 	breq	MLP_ENVAR		; when "decay"
 	lds	r16, RELEASETIME
-	cpi	r17, 4
+	cpi	r17, ENV_RELEASE
 	breq	MLP_ENVAR		; when "release"
 	lds	r22, SUSTAINLEVEL
-	cpi	r17, 3			; when sustain
+	cpi	r17, ENV_SUSTAIN	; when sustain
 	breq	MLP_ESUSTAIN
 	rjmp	MLP_EEXIT		; when "stop"
 
@@ -4794,11 +5699,11 @@ MLP_ENVAR:
 	lds	r20, ENV_FRAC_H		;  > r21:r20:r19 = L
 	lds	r21, ENV_INTEGR		; /
 	lds	r22, ENVPHASE
-	cpi	r22, 4
+	cpi	r22, ENV_RELEASE
 	breq	MLP_ERELEASE
 
 MLP_EATTACK:
-	cpi	r22, 2
+	cpi	r22, ENV_DECAY
 	breq	MLP_EDECAY
 	add	r19, r16		; \
 	adc	r20, r17		;  > r21:r20:r19 = L + dL
@@ -4809,7 +5714,7 @@ MLP_EATTACK:
 	ldi	r19, 255		; \
 	ldi	r20, 255		;  > L = Lmax
 	ldi	r21, 255		; /
-	ldi	r16, 2			; now decay
+	ldi	r16, ENV_DECAY		; now decay
 	rjmp	MLP_ESTOREP
 
 MLP_EDECAY:
@@ -4820,7 +5725,7 @@ MLP_EDECAY:
 	lds	r22, SUSTAINLEVEL
 	cp	r22, r21		; sustain level < L - dL?
 	brlo	MLP_ESTORE		; yes: Keep going if we haven't hit sustain level
-	ldi	r16, 3			; now sustain
+	ldi	r16, ENV_SUSTAIN	; now sustain
 	sts	ENVPHASE, r16		; store phase
 MLP_ESUSTAIN:
 	clr	r19			; correct sustain level after decay is done
@@ -4839,7 +5744,7 @@ MLP_BOTTOM:
 	ldi	r19, 0			; \
 	ldi	r20, 0			;  > L = 0
 	ldi	r21, 0			; /
-	ldi	r16, 0			; stop
+	ldi	r16, ENV_STOP		; stop
 
 MLP_ESTOREP:
 	sts	ENVPHASE, r16		; store phase
@@ -4858,16 +5763,16 @@ MLP_EEXIT:
 	lds	r16, ATTACKTIME2	; copy of KNOB_DCF_ATTACK
 
 MLP_PHASE2:
-	cpi	r17, 1
+	cpi	r17, ENV_ATTACK
 	breq	MLP_ENVAR2		; when "attack"
 	lds	r16, DECAYTIME2
-	cpi	r17, 2
+	cpi	r17, ENV_DECAY
 	breq	MLP_ENVAR2		; when "decay"
 	lds	r16, RELEASETIME2
-	cpi	r17, 4
+	cpi	r17, ENV_RELEASE
 	breq	MLP_ENVAR2		; when "release"
 	lds	r22, SUSTAINLEVEL2
-	cpi	r17, 3			; when sustain
+	cpi	r17, ENV_SUSTAIN	; when sustain
 	breq	MLP_ESUSTAIN2
 	rjmp	MLP_EEXIT2		; when "stop"
 
@@ -4883,11 +5788,11 @@ MLP_ENVAR2:
 	lds	r20, ENV_FRAC_H2	;  > r21:r20:r19 = L
 	lds	r21, ENV_INTEGR2	; /
 	lds	r22, ENVPHASE2
-	cpi	r22, 4
+	cpi	r22, ENV_RELEASE
 	breq	MLP_ERELEASE2
 
 MLP_EATTACK2:
-	cpi	r22, 2
+	cpi	r22, ENV_DECAY
 	breq	MLP_EDECAY2
 	add	r19, r16		; \
 	adc	r20, r17		;  > r21:r20:r19 = L + dL
@@ -4898,7 +5803,7 @@ MLP_EATTACK2:
 	ldi	r19, 255		; \
 	ldi	r20, 255		;  > L = Lmax
 	ldi	r21, 255		; /
-	ldi	r16, 2			; now decay
+	ldi	r16, ENV_DECAY		; now decay
 	rjmp	MLP_ESTOREP2
 
 MLP_EDECAY2:
@@ -4909,7 +5814,7 @@ MLP_EDECAY2:
 	lds	r22, SUSTAINLEVEL2
 	cp	r22, r21
 	brlo	MLP_ESTORE2		; Keep going if we haven't hit sustain level
-	ldi	r16, 3			; now sustain
+	ldi	r16, ENV_SUSTAIN	; now sustain
 	sts	ENVPHASE2, r16		; store phase
 MLP_ESUSTAIN2:
 	clr	r19			; correct sustain level after decay is done
@@ -4928,7 +5833,7 @@ MLP_BOTTOM2:
 	ldi	r19, 0			; \
 	ldi	r20, 0			;  > L = 0
 	ldi	r21, 0			; /
-	ldi	r16, 0			; stop
+	ldi	r16, ENV_STOP		; stop
 	sts	VCF_STATUS, r16		; Flag VCF as off when we hit the bottom limit.
 
 MLP_ESTOREP2:
@@ -4941,22 +5846,226 @@ MLP_ESTORE2:
 MLP_EEXIT2:
 	; End of Envelope 2
 
+.if USE_ARPEGGIATOR
+	;--------------------------------------------------------------------
+	; ARPEGGIATOR:
+	;--------------------------------------------------------------------
+
+	; MIDINOTE hold the last pressed (current) note (GATE=1)
+	; or 0xFF for a not active note (GATE=0)
+
+	; check if arpeggiator is enabled
+	lds	r16, PATCH_SWITCH4
+	bst	r16, SW_ARP_ENABLE
+	brts	arp
+
+	lds	r16, MIDINOTE_NEXT
+	sts	MIDINOTE, r16		; update MIDINOTE, can be invalid
+	rjmp	MLP_GATE
+
+arp:
+	; get state
+	lds	r16, ARPSTATE
+	cpi	r16, ARPSTATE_REST
+	breq	arp_rest
+	cpi	r16, ARPSTATE_NOTEON
+	breq	arp_noteon
+	cpi	r16, ARPSTATE_NOTEOFF
+	breq	arp_noteoff
+
+	; illegal state
+	ldi	r16, ARPSTATE_REST
+	sts	ARPSTATE, r16
+	rjmp	arp_done
+
+;-------------------------
+arp_rest:
+	; wait for active note
+	lds	r16, NOTES_ACTIVE
+	tst	r16
+	brne	arp_note_have
+	rjmp	arp_done		; no active note available
+
+arp_note_have:
+	; we have an active note
+	clr	r16			; restart arp timing/rate generator
+	sts	ARPPHASE_FRAC_L, r16
+	sts	ARPPHASE_FRAC_H, r16
+	sts	ARPPHASE_INTEGR, r16
+
+	clr	r16			; get the frist note from the head of the buffer
+	sts	ARPNOTE, r16		; midi note buffer index
+	rcall	note_index		; update MIDINOTE
+
+	; next state
+	ldi	r16, ARPSTATE_NOTEON
+	sts	ARPSTATE, r16
+
+	; start first note
+	; MIDINOTE = last note captured from midi input (GATE=1, GATEEDGE=1)
+	rjmp	MLP_GATE		; check GATE and GATEEDGE, clear GATEEDGE
+					; decrement PORTACNT
+					; starts envelope generators
+					; restart LFOs
+;-------------------------
+arp_noteon:
+	; check for active notes
+	lds	r16, NOTES_ACTIVE
+	tst	r16
+	brne	arp_noteon_active
+
+arp_noteon_notactive:
+	; no more active notes
+	ldi	r16, ARPSTATE_REST
+	sts	ARPSTATE, r16
+	rjmp	arp_note_stop
+
+arp_noteon_active:
+	; increment phase
+	rcall	arp_increment		; r18:r17:r16 arp phase
+
+	; check for end of note
+	lds	r19, ARP_THRESHOLD
+	cpi	r19, ARP_THRESHOLD_MIN
+	brsh	arp_thershold_1
+	ldi	r19, ARP_THRESHOLD_MIN
+arp_thershold_1:
+	cp	r18, r19		; arp phase < ARP_THRESHOLD
+	brsh	arp_noteon_stop		; yes
+	rjmp	arp_done		; no
+
+arp_noteon_stop:
+	; note played, we can remove it in "Play Once" mode
+	lds	r17, PATCH_SWITCH4	; repeat notes or play then only one time
+	bst	r17, SW_ARP_REPEAT
+	brts	arp_note_keep		; yes: repeat notes
+
+; disable midi receiver interrupt
+	cbi	UCSRB, RXCIE		; RXCIE=0 (disable UART interrupts)
+	call 	note_remove		; remove played note from buffer
+; enable midi receiver interrupt
+	sbi	UCSRB, RXCIE		; RXCIE=1
+
+arp_note_keep:
+	ldi	r16, ARPSTATE_NOTEOFF
+	sts	ARPSTATE, r16
+
+arp_note_stop:
+	; no note available
+	rjmp	MLP_KEYOFF		; release envelope generators
+
+;-------------------------
+arp_noteoff:
+	; check for active notes
+	lds	r16, NOTES_ACTIVE
+	tst	r16
+	brne	arp_noteoff_active
+
+arp_noteoff_notactive:
+	; no more active notes
+	ldi	r16, ARPSTATE_REST
+	sts	ARPSTATE, r16
+	rjmp	arp_done
+
+arp_noteoff_active:
+	; increment phase
+	rcall	arp_increment
+
+	; check for start of new note
+	lds	r19, ARP_THRESHOLD
+	cpi	r19, ARP_THRESHOLD_MIN
+	brsh	arp_thershold_2
+	ldi	r19, ARP_THRESHOLD_MIN
+arp_thershold_2:
+
+	cp	r18, r19
+	brlo	arp_noteoff_start
+	rjmp	arp_done
+
+arp_noteoff_start:
+	ldi	r16, ARPSTATE_NOTEON
+	sts	ARPSTATE, r16
+; disable midi receiver interrupt
+	cbi	UCSRB, RXCIE		; RXCIE=0 (disable UART interrupts)
+	rcall	note_next		; load MIDINOTE (r16), if there is a next note
+; enable midi receiver interrupt
+	sbi	UCSRB, RXCIE		; RXCIE=1
+	; start next note
+	rjmp	MLP_KEYON_ARP
+
+; !!! what to do when the next note is not valid?
+;	; check for valid note
+;	lds	r16, MIDINOTE
+;	cpi	r16, 0xff		; invalid note?
+;	brne	MLP_KEYON_ARP		; starts envelope generators
+					; restart LFOs
+arp_done:
+	rjmp	MLP_NOTEON		; don't touch envelope generators
+
+;-------------------------
+arp_increment:
+	; get phase increment
+	lds	r16, ARP_RATE
+	rcall	ARPTORATE               ; r19:r18 = rate
+	lds	r22, DELTAT_L		; \
+	lds	r23, DELTAT_H		; / r23:r22 = dT
+	rcall	MUL32X16		;   r18:r17:r16 = dL
+
+	; get current phase
+	lds	r19, ARPPHASE_FRAC_L
+	lds	r20, ARPPHASE_FRAC_H
+	lds	r21, ARPPHASE_INTEGR
+
+	; add	increment
+	add	r16, r19
+	adc	r17, r20
+	adc	r18, r21
+
+	; store new phase
+	sts	ARPPHASE_FRAC_L, r16
+	sts	ARPPHASE_FRAC_H, r17
+	sts	ARPPHASE_INTEGR, r18
+	ret
+
+;----------------------------------------------------------------------------
+; "time" --> "rate" conversion
+; - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+; In:	r16 = time			0..255
+; Out:	r19:r18:r17:r16 = rate		0x001B0000..0xFFFF0000
+; Used:	SREG, r0, r30:r31
+;----------------------------------------------------------------------------
+ARPTORATE:
+.if !USE_ARP_TIMETORATE_128
+	lsr	r16
+.endif	; !USE_ARP_TIMETORATE_128
+	lsr	r16			; 0..63
+	ldi	r30, low( ARP_TIMETORATE)
+	ldi	r31, high(ARP_TIMETORATE)
+	rcall	TAB_WORD		; r19:r18 = rate
+	clr	r16
+	clr	r17
+	ret
+
+.endif	; USE_ARPEGGIATOR
+
 	;--------------------------------------------------------------------
 	; GATE:
 	;--------------------------------------------------------------------
+MLP_GATE:
 	lds	r16, GATE		; set on note on, cleared on note off
 	tst	r16			; check GATE
-	brne	MLP_KEYON
+	brne	MLP_KEYON		; GATE = 1
 
-; no key is pressed:
+; no key is pressed, start release phase of envelope generators
 MLP_KEYOFF:
-	ldi	r16, 4
+	ldi	r16, ENV_RELEASE
 	; don't restart envelope 1 for release if it's already stopped.
 	lds	r17, ENVPHASE
-	tst	r17
-	breq	MLP_NOTEON		; Don't put envelope 1 in release mode if it is already stopped
+	tst	r17       		; is 0 for ENV_STOP
+	breq	MLP_KEYOFF_1		; Don't put envelope 1 in release mode if it is already stopped
 	sts	ENVPHASE, r16		; (re)start "release" phase
 
+MLP_KEYOFF_1:
 	; don't restart envelope 2 for release if it's already stopped.
 	lds	r17, ENVPHASE2
 	tst	r17
@@ -4973,6 +6082,8 @@ MLP_KEYON:
 ; key has just been pressed:
 	ldi	r16, 0			; \
 	sts	GATEEDGE, r16		; / GATEEDGE = 0
+MLP_KEYON_ARP:
+	; for portamento we need a first note
 	lds	r16, PORTACNT		; \
 	tst	r16			;  \
 	breq	MLP_KEYON1		;   > if ( PORTACNT != 0 )
@@ -4981,7 +6092,7 @@ MLP_KEYON:
 
 MLP_KEYON1:
 ; envelope starts:
-	ldi	r16, 1			; \ (re)start attack phase
+	ldi	r16, ENV_ATTACK		; \ (re)start attack phase
 	sts	ENVPHASE, r16		; /
 	sts	ENVPHASE2, r16		; also for ENV2
 	sts	VCF_STATUS, r16		; Flag VCF as on
@@ -5003,7 +6114,7 @@ MLP_KEYON1:
 	sts	LFO2_FRAC_H, r17	;  > store A
 	sts	LFO2_INTEGR, r18	; /
 .endif	; USE_SYNC_LFO2
-	ldi	r16, 1			; \
+	ldi	r16, LFOPHASE_FALL	; \
 	sts	LFOPHASE, r16		; / begin of falling
 .if USE_SYNC_LFO2
 	sts	LFO2PHASE, r16
@@ -5017,17 +6128,20 @@ MLP_NOTEON:
 	ldi	r22, 0			;  > r23:r22:r25 = note# 0..127
 	lds	r23, MIDINOTE		; /
 	cpi	r23, 255		; valid note?
-	brne	MLP_NLIM2
+	brne	MLP_NLIM2		; yes
 
-	; let the oscillator running, but stop it when there is no VCA output
-	lds	r16, LEVEL
-	tst	r16
-	breq	MLP_VCOX_1		; level for VCA is zero
+	; note is not valid, so reload last NOTE
+; !!! not sure if this make sense
+;	; let the oscillator running, but stop it when there is no VCA output
+;	lds	r16, LEVEL
+;	tst	r16
+;	breq	MLP_VCOX_1		; level for VCA is zero
+
 	lds	r25, NOTE_L		; \
-	lds	r22, NOTE_H		;  > r27:r26:r25 = nCurr
+	lds	r22, NOTE_H		;  > r23:r22:r25 = nEnd
 	lds	r23, NOTE_INTG		; /
 	rjmp	MLP_PORTA
-MLP_VCOX_1:
+;MLP_VCOX_1:
 	rjmp	MLP_VCOX		; no: skip transpose, portamento, pitch bender,
 					; lfo modulation, detune
 
@@ -5052,12 +6166,13 @@ MLP_NLIM4:
 
 ; portamento:
 MLP_PORTA:
-	lds	r16, PORTACNT		; \
-	tst	r16			;  > jump when it's the first note
-	brne	MLP_PORTAWR		; /  (PORTACNT != 0)
+	; r23:r22:r25 previous NOTE values
 	lds	r25, NOTE_L		; \
 	lds	r26, NOTE_H		;  > r27:r26:r25 = nCurr
 	lds	r27, NOTE_INTG		; /
+	lds	r16, PORTACNT		; \
+	tst	r16			;  > jump when it's the first note
+	brne	MLP_PORTAWR		; /  (PORTACNT != 0) we have no previous note to do a portamento
 	lds	r16, PORTAMENTO
 	rcall	ADCTORATE		; r19:r18:r17:r16 = portamento rate
 	push	r22
@@ -5372,12 +6487,18 @@ REZ_OVERFLOW_CHECK:
 
 .if USE_DCA_MOD_SWITCH
 	lds	r17, PATCH_SWITCH3	; \ check DCA mode:
+	sbrc	r17, SW_DCA_OPEN	; / 0 (gate control), 1 (open)
+	rjmp	MLP_VCAOPN
 	sbrc	r17, SW_DCA_MODE	; / 0 (gate), 1 (env)
 	rjmp	MLP_VCAENV		; jump when mode==env
 	lds	r16, GATE		; \
 	ror	r16			; / GATE --> Cy
 	ldi	r16, 0			; \ r16 =   0 (when GATE == 0),
 	sbc	r16, r16		; / r16 = 255 (when GATE == 1)
+	rjmp	MLP_VCAOK
+
+MLP_VCAOPN:
+	ldi	r16, 255
 	rjmp	MLP_VCAOK
 .endif	; USE_DCA_MOD_SWITCH
 
@@ -5424,6 +6545,431 @@ MLP_VOL0DB:
 	;--------------------------------------------------------------------
 	; back to the main loop:
 	;--------------------------------------------------------------------
+	rjmp	MAINLOOP
+
+RESET:
+	cli				; disable interrupts
+
+; JTAG Disable - Set JTD in MCSCSR
+	lds	r16, MCUCSR		; Read MCUCSR
+	sbr	r16, 1 << JTD		; Set jtag disable flag
+	out	MCUCSR, r16		; Write MCUCSR
+	out	MCUCSR, r16		; and again as per datasheet
+
+; initialize stack:
+	ldi	r16, low(RAMEND)
+	ldi	r17, high(RAMEND)
+	out	SPL, r16
+	out	SPH, r17
+
+.if USE_SERIAL_OUT
+; initialize uart transmitter buffer
+	clr	r16
+	sts	UART_TxHead, r16	; UART_TxHead = 0
+ 	sts	UART_TxTail, r16	; UART_TxTail = 0
+.endif	; USE_SERIAL_OUT
+
+; initialize variables:
+	clr	ZERO
+	clr	PHASEA_0
+	clr	PHASEA_1
+	clr	PHASEA_2
+	clr	PHASEB_0
+	clr	PHASEB_1
+	clr	PHASEB_2
+
+	clr	a_L			; clear DCF registers	(lp_L)
+	clr	a_H			;			(lp_H)
+
+	ldi	r16, 0
+	sts	LED_STATUS, r16		; LED status = off
+	sts	LED_TIMER, r16		; clear it
+	sts	BUTTON_STATUS, r16	; clear it, no buttons pressed
+	sts	CONTROL_SWITCH, r16	; clear it, no switches flipped
+	sts	SETMIDICHANNEL, r16	; Default MIDI channel to zero (omni)
+	sts	SWITCH3, r16		; clear it, MIDI/Save/Load switch hasn't been scanned yet, so clear it
+.if USE_ORIGINAL_DCO_FM
+	sts	FMDEPTH, r16		; FM Depth = 0
+.endif	; USE_ORIGINAL_DCO_FM
+
+	sts	MIDI_TASK_UPDATE, r16	; no active task
+
+	sts	RESONANCE, r16		; Resonance = 0
+	sts	PORTAMENTO, r16		; Portamento = 0
+	sts	SETMIDICHANNEL, r16	; 0 for OMNI or 1..15
+	sts	GATE, r16		; GATE = 0
+	sts	GATEEDGE, r16		; GATEEDGE = 0
+	sts	LEVEL, r16		; LEVEL = 0
+	sts	ENV_FRAC_L, r16		; \
+	sts	ENV_FRAC_H, r16		;  > ENV = 0
+	sts	ENV_INTEGR, r16		; /
+.if USE_INIT_LFO2
+	sts	ENV_FRAC_L2, r16	; \
+	sts	ENV_FRAC_H2, r16	;  > ENV = 0
+	sts	ENV_INTEGR2, r16	; /
+.endif	; USE_INIT_LFO2
+	sts	ADC_CHAN, r16		; ADC_CHAN = 0
+	sts	NOTE_L, r16		; \
+	sts	NOTE_H, r16		;  >
+	sts	NOTE_INTG, r16		; /
+	sts	MIDIPBEND_L, r16	; \
+	sts	MIDIPBEND_H, r16	; / P.BEND = 0
+	sts	MIDIMODWHEEL, r16	; MOD.WHEEL = 0
+	sts	KNOB_SHIFT, r16		; Initialize panel shift switch = 0 (unshifted)
+	sts	VCF_STATUS, r16		; Flag VCF as off (0)
+
+	ldi	r16, 2
+	sts	PORTACNT, r16		; PORTACNT = 2
+
+	ldi	r16, 255
+	sts	POWER_UP, r16		; Set power_up flag to 255 to force first initialization of panel switches
+.if !MEEBLIP_MICRO_V2_04_HW
+	sts	WRITE_MODE, r16		; Patch write mode defaults to "off"
+.endif
+	sts	LPF_I, r16		; no DCF
+	sts	HPF_I, r16
+	sts	MIDINOTE, r16		; note# = 255
+.if !USE_ARPEGGIATOR
+	sts	MIDINOTEPREV, r16	; note# = 255
+.endif ; !USE_ARPEGGIATOR
+
+	ldi	r16, 0x5E		; \
+	ldi	r17, 0xB4		;  \
+	ldi	r18, 0x76		;   \ initialising of
+	sts	SHIFTREG_0, r16		;   / shift register
+	sts	SHIFTREG_1, r17		;  /
+	sts	SHIFTREG_2, r18		; /
+
+;	ldi	r16, 0x5E		; \
+;	ldi	r17, 0xB4		;  \
+;	ldi	r18, 0x76		;   \ initialising of
+	sts	LFSR_0, r16		;   / linear feedback shift register
+	sts	LFSR_1, r17		;  /
+	sts	LFSR_2, r18		; /
+
+	ldi	r16, 0			; \
+	ldi	r17, 0			;  > Amin = 0
+	ldi	r18, 0			; /
+	sts	LFOBOTTOM_0, r16	; \
+	sts	LFOBOTTOM_1, r17	;  > store Amin for LFO
+	sts	LFOBOTTOM_2, r18	; /
+.if USE_MIDI_PWMDEPTH
+	sts	LFO2BOTTOM_0, r16	; \
+	sts	LFO2BOTTOM_1, r17	;  > store Amin for LFO2
+	sts	LFO2BOTTOM_2, r18	; /
+.endif	; USE_MIDI_PWMDEPTH
+
+	ldi	r16, 255		; \
+	ldi	r17, 255		;  > Amax = 255,999
+	ldi	r18, 255		; /
+	sts	LFOTOP_0, r16		; \
+	sts	LFOTOP_1, r17		;  > store Amax for LFO
+	sts	LFOTOP_2, r18		; /
+
+.if !USE_MIDI_PWMDEPTH
+	ldi	r18, 20
+	sts	LFO2BOTTOM_0, r16	; \
+	sts	LFO2BOTTOM_1, r17	;  > store Amin for LFO2
+	sts	LFO2BOTTOM_2, r18	; /
+
+	ldi	r18, 100
+.endif	; !USE_MIDI_PWMDEPTH
+	sts	LFO2TOP_0, r16		; \
+	sts	LFO2TOP_1, r17		;  > store Amax for LFO2
+	sts	LFO2TOP_2, r18		; /
+
+.if USE_ARPEGGIATOR
+; initialize arpeggiator
+	clr	r16
+	sts	ARPSTATE, r16		; set to ARPSTATE_REST
+	sts	ARPPHASE_FRAC_L, r16	; restart arp timing/rate generator
+	sts	ARPPHASE_FRAC_H, r16
+	sts	ARPPHASE_INTEGR, r16
+	sts	NOTES_ACTIVE, r16	; no active note in buffer
+	sts	ARPNOTE, r16		; midi note buffer index
+
+; initialize notes
+	ldi	r30, low(NOTES_BUFFER)
+	ldi	r31, high(NOTES_BUFFER)
+	ldi	r16, $ff
+	ldi	r17, NOTES_BUFFERSIZE
+midinote_buffer_init:
+	st	z+, r16
+	dec	r17
+	brne	midinote_buffer_init
+.endif	; USE_ARPEGGIATOR
+
+; initialize sound parameters:
+.if MEEBLIP_MICRO_V2_04_HW
+	clr	r16
+.else
+	ldi	r16, 0
+.endif
+	sts	LFOPHASE, r16
+	sts	LFO2PHASE, r16
+	sts	ENVPHASE, r16		; stop
+.if USE_INIT_LFO2
+	sts	ENVPHASE2, r16		; stop
+.endif	; USE_INIT_LFO2
+
+	sts	DETUNEB_FRAC, r16	; \
+	sts	DETUNEB_INTG, r16	; / detune = 0
+	sts	LFOLEVEL, r16
+
+	ldi	r16, 128
+	sts	DCOA_LEVEL, r16
+	sts	DCOB_LEVEL, r16
+.if USE_MASTER_VOLUME
+	ldi	r16, $80		; set volume to 0dB, middle of the knob
+	sts	MASTER_VOLUME, r16
+	ldi	r16, 255
+	sts	VOLUME, r16
+	ldi	r16, 1
+	sts	VOLUME_X4, r16
+.endif	; USE_MASTER_VOLUME
+
+; default values for midi cc parameter
+	ldi	r16, 4			; \ Set LFO to slow sweep for PWM modulation
+	sts	LFO2FREQ, r16		; /
+
+	ldi	r16, 128
+	sts	PWMDEPTH, r16
+
+	ldi	r16, 0
+	sts	ATTACKTIME2, r16
+	sts	RELEASETIME2, r16
+	sts	ATTACKTIME, r16
+	sts	RELEASETIME, r16
+
+	ldi	r16, 128
+	sts	DECAYTIME2, r16
+	sts	SUSTAINLEVEL2, r16
+	sts	SUSTAINLEVEL, r16
+	sts	DECAYTIME, r16
+
+	; SW_KNOB_SHIFT = upper
+;	ldi	r16, (1<<SW_KNOB_SHIFT)
+;	sts	PATCH_SWITCH1, r16
+;
+;	ldi	r16, 0x00
+;	sts	PATCH_SWITCH2, r16
+
+	; SW_DCA_MODE = env, SW_MODWHEEL_ENA = on
+	; SW_LFO_KBD_SYNC = on, SW_DCF_KBD_TRACK = on
+	ldi	r16, (1<<SW_DCA_MODE)     | (1<<SW_MODWHEEL_ENA) |\
+		     (1<<SW_LFO_KBD_SYNC) | (1<<SW_DCF_KBD_TRACK)|\
+		     (1<<SW_TRANSPOSE)    | (0<<SW_MIX_RING)
+	sts	PATCH_SWITCH3, r16
+	sts	SW3, r16
+
+	ldi	r16, 0x00
+	sts	PATCH_SWITCH4, r16
+	sts	SW4, r16
+
+ 	ldi	r16, (1<<ENABLE_MIDI_CC_OUT) | (1<<ENABLE_DEBUG_OUT)
+ 	sts	CONTROL_STATE, r16
+
+;-------------------------
+.if MEEBLIP_MICRO_V2_04_HW
+; initialize port A:
+	ldi	r16, 0x00 		; \
+	out	DDRA, r16		; / PA = iiiiiiii    all inputs (panel pots)
+	ldi	r16, 0xFF		; enable internal pull-ups, even though we're using analog inputs
+	out	PORTA, r16		; / PA = pppppppp
+
+; initialize port B:
+	ldi	r16, 0x00		; \
+	out	DDRB, r16		; / PB = iiiiiiii    all inputs, pull-ups enabled
+	ldi	r16, 0xff		; \
+	out	PORTB, r16		; / PB = pppppppp
+
+; initialize port C:
+	ldi	r16, 0xFF		; \
+	out	DDRC, r16		; / PC = oooooooo    all outputs (DAC)
+	ldi	r16, 0x00		; \
+	out	PORTC, r16		; / PC = 00000000
+
+; initialize port D:
+	ldi	r16, 0x0E		; \ PD = iiiioooi
+	out	DDRD, r16		; / PD0 (MIDI-IN)
+	ldi	r16, 0xFC 		; \
+	out	PORTD, r16		; / PD = 1111110z
+
+;-------------------------
+.else	; MEEBLIP_MICRO_V2_04_HW
+; initialize port A:
+	ldi	r16, 0x00		; \
+	out	PORTA, r16		; / PA = zzzzzzzz
+	ldi	r16, 0x00		; \
+	out	DDRA, r16		; / PA = iiiiiiii    all inputs (panel pots)
+
+; initialize port B:
+.if MEEBLIP_V1_31_HW
+	ldi	r16, 0xFF		; \
+	out	PORTB, r16		; / PB = pppppppp
+	ldi	r16, 0x00		; \
+	out	DDRB, r16		; / PB = iiiiiiii    all inputs
+.else	; MEEBLIP_V1_31_HW
+	ldi	r16, 0xFF		; \
+	out	PORTB, r16		; / PB = pppppppp
+	ldi	r16, 0x40		; \ PB6 MISO = MIDI_LED
+	out	DDRB, r16		; / PB = ioiiiiii    all inputs except PB6 (MIDI-LED)
+.endif	; MEEBLIP_V1_31_HW
+
+; initialize port C:
+	ldi	r16, 0x00		; \
+	out	PORTC, r16		; / PC = 00000000
+	ldi	r16, 0xFF		; \
+	out	DDRC, r16		; / PC = oooooooo    all outputs (DAC)
+
+; initialize port D:
+.if MEEBLIP_V1_31_HW
+	ldi	r16, 0xFC		; \
+	out	PORTD, r16		; / PD = 1111110z
+	ldi	r16, 0xFE		; \
+	out	DDRD, r16		; / PD = oooooooi    all outputs except PD0 (MIDI-IN)
+.else	; MEEBLIP_V1_31_HW
+	ldi	r16, 0xFE		; \
+	out	PORTD, r16		; / PD = 1111111z
+	ldi	r16, 0xFE		; \
+	out	DDRD, r16		; / PD = oooooooi    all outputs except PD0 (MIDI-IN)
+.endif	; MEEBLIP_V1_31_HW
+.endif	; MEEBLIP_MICRO_V2_04_HW
+
+; Turn Power/MIDI LED on at power up
+
+	sbi	PORT_MIDI_LED, MIDI_LED	; LED on
+
+; initialize DAC port pins
+
+	sbi	PORTD, DAC_WR		; Set WR high
+	cbi	PORTD, DAC_AB		; Pull DAC AB port select low
+
+; initialize Timer0:
+	ldi	r16, 0x00		; \
+	out	TCCR0, r16		; / stop Timer 0
+
+; initialize Timer1:
+	ldi	r16, 0x04		; \ prescaler = CK/256
+	out	TCCR1B, r16		; / (clock = 32탎)
+
+; initialize Timer2:
+	ldi	r16, 54			; \
+	out	OCR2, r16		; / OCR2 = 54 gives 36363.63636 Hz sample rate at ~440 cycles per sample loop.
+	ldi	r16, 0x0A		; \ clear timer on compare,
+	out	TCCR2, r16		; / set prescaler = CK/8
+
+; initialize UART
+.if USE_DEBUG_OUT
+	call	debug_uart_init_default_baudrate	; set baudrate to 38400
+.else	; USE_DEBUG_OUT
+	call	uart_init		; first time initialisation
+.endif	; USE_DEBUG_OUT
+
+; initialize ADC:
+	ldi	r16, 0x86		; \
+	out	ADCSRA, r16		; / ADEN=1, clk = 125 kHz
+
+; initialize interrupts:
+	ldi	r16, 0x80		; \
+	out	TIMSK, r16		; / OCIE2=1
+
+	sei				; Interrupt Enable
+
+; start conversion of the first A/D channel:
+	lds	r18, ADC_CHAN
+	call	ADC_START
+
+; store initial pot positions as OLD_ADC values to avoid snapping to new value unless knob has been moved.
+
+	; Store value of Pot ADC0
+	ldi	r28, low(ADC_0)		; save current adc value
+	ldi	r29, high(ADC_0)
+	add	r28, r18
+	adc	r29, ZERO
+	call	ADC_END			; r16 = AD(i)
+	st	Y, r16			; AD(i) --> ADC_i
+
+	inc	r18			; Now do ADC1
+	call	ADC_START		; start conversion of next channel
+	inc	r28
+	call	ADC_END			; r16 = AD(i)
+	st	Y, r16			; AD(i) --> ADC_i
+
+	inc	r18			; Now do ADC2
+	call	ADC_START		; start conversion of next channel
+	inc	r28
+	call	ADC_END			; r16 = AD(i)
+	st	Y, r16			; AD(i) --> ADC_i
+
+	inc	r18			; Now do ADC3
+	call	ADC_START		; start conversion of next channel
+	inc	r28
+	call	ADC_END			; r16 = AD(i)
+	st	Y, r16			; AD(i) --> ADC_i
+
+	inc	r18			; Now do ADC4
+	call	ADC_START		; start conversion of next channel
+	inc	r28
+	call	ADC_END			; r16 = AD(i)
+	st	Y, r16			; AD(i) --> ADC_i
+
+	inc	r18			; Now do ADC5
+	call	ADC_START		; start conversion of next channel
+	inc		r28
+	call	ADC_END			; r16 = AD(i)
+	st	Y, r16			; AD(i) --> ADC_i
+
+	inc	r18			; Now do ADC6
+	call	ADC_START		; start conversion of next channel
+	inc	r28
+	call	ADC_END			; r16 = AD(i)
+	st	Y, r16			; AD(i) --> ADC_i
+
+	inc	r18			; Now do ADC7
+	call	ADC_START		; start conversion of next channel
+	inc	r28
+	call	ADC_END			; r16 = AD(i)
+	st	Y, r16			; AD(i) --> ADC_i
+
+	ldi	r18, 0
+	sts	ADC_CHAN, r18
+	call	ADC_START		; start conversion of ADC0 for main loop
+
+; Load current patch from eeprom
+
+	ldi	r18, $03
+	ldi	r17, $FE		; Set eeprom address to $03FE (second last byte)
+	call	EEPROM_READ		; load current patch number into r16
+	call	LOAD_PATCH		; load patch into synthesis engine
+
+; Load MIDI channel from eeprom
+
+	ldi	r18, $03
+	ldi	r17, $FF		; Set eeprom address to $03FF (last byte)
+	call	EEPROM_READ		; load MIDI CHANNEL into r16
+	sts	SETMIDICHANNEL, r16
+
+; initialize the keyboard scan time
+	in	r16, TCNT1L		; \
+	in	r17, TCNT1H		; / r17:r16 = TCNT1 = t
+	sts	TPREV_KBD_L, r16
+	sts	TPREV_KBD_H, r17
+
+.if USE_DEBUG_OUT
+	call	debug_uart_startup_message
+
+; print knob parameter values from eeprom to serial port
+; print switch/modeflags status to serial port
+	call	print_sound_parameter
+
+; reinitialize UART for midi
+	; before change the baudrate wait for transmitter ready
+	call	debug_uart_ready
+
+	call	uart_init
+.endif	; USE_DEBUG_OUT
+
 	rjmp	MAINLOOP
 
 ;----------------------------------------------------------------------------
@@ -7024,374 +8570,13 @@ TRI_LIMIT11:
 ;----------------------------------------------------------------------------
 ;
 ;----------------------------------------------------------------------------
-.if USE_UART
+.if USE_DEBUG_OUT
 
-debug_entry:
-	push	r17
-	push	r16
+#define	STARTUP_MSG	"aweMeeblip-SE V3.03  (c) AWe 2013 "
 
-	call	usart_init_default_baudrate	; set baudrate to 38400
-	pop	r16
-	pop	r17
-	ret
+	.include "print_msg.inc"
 
-;----------------------------------------------------------------------------
-; reinitialize UART for midi
-debug_exit:
-	push	r16
-debug_byte_midi:
-	sbis	UCSRA, UDRE			; before change the baudrate wait for transmitter ready
-	rjmp	debug_byte_midi
-
-	ldi	r16, high((cpu_frequency / (baud_rate * 16)) - 1)
-	out	UBRRH, r16
-	ldi	r16, low((cpu_frequency / (baud_rate * 16)) - 1)
-	out	UBRRL, r16
-
-; enable receiver and receiver interrupt
-	ldi	r16, (1<<RXCIE)|(1<<RXEN)	; \
-	out	UCR, r16			; / RXCIE=1, RXEN=1
-	pop	r16
-	ret
-
-;-------------------------
-debug_byte:
-	push	r16
-
-	call	usart_write_byte
-	call	usart_write_crlf
-
-	pop	r16
-	ret
-
-; from Atmel application note AVR204
-;
-; ***************************************************************************
-; *
-; * "bin2BCD16" - 16-bit Binary to BCD conversion
-; *
-; * This subroutine converts a 16-bit number (fbinH:fbinL) to a 5-digit
-; * packed BCD number represented by 3 bytes (tBCD2:tBCD1:tBCD0).
-; * MSD of the 5-digit number is placed in the lowermost nibble of tBCD2.
-; *
-; * Number of words	: 25
-; * Number of cycles	: 751/768 (Min/Max)
-; * Low registers used	: 3 (tBCD0, tBCD1, tBCD2)
-; * High registers used	: 4(fbinL, fbinH, cnt16a, tmp16a)
-; * Pointers used	: Z
-; *
-; ***************************************************************************
-
-; ***** Subroutine Register Variables
-
-	.equ	AtBCD0	= 12		; address of tBCD0
-	.equ	AtBCD1	= 13		; address of tBCD2
-	.equ	AtBCD2	= 14		; address of tBCD4
-
-	.def	tBCD0	= r12		; BCD value digits 1 and 0
-	.def	tBCD1	= r13		; BCD value digits 3 and 2
-	.def	tBCD2	= r14		; BCD value digit 4
-
-	.def	fbinL	= r16		; binary value Low byte
-	.def	fbinH	= r17		; binary value High byte
-	.def	cnt16a	= r18		; loop counter
-	.def	tmp16a	= r19		; temporary value
-
-; ***** Code
-
-bin2BCD16:
-	push	r12
-	push	r13
-	push	r14
-
-	ldi	cnt16a, 16	; Init loop counter
-	clr	tBCD2		; clear result (3 bytes)
-	clr	tBCD1
-	clr	tBCD0
-	clr	ZH		; clear ZH
-bBCDx_1:
-	lsl	fbinL		; shift input value
-	rol	fbinH		; through all bytes
-	rol	tBCD0		;
-	rol	tBCD1
-	rol	tBCD2
-	dec	cnt16a		; decrement loop counter
-	brne	bBCDx_2		; if counter not zero
-
-	movw	r16, tBCD0
-	mov	r18, tBCD2
-	pop	r14
-	pop	r13
-	pop	r12
-	ret			;   return
-
-bBCDx_2:
-	ldi	ZL, AtBCD2+1	; Z points to result MSB + 1
-bBCDx_3:
-	ld	tmp16a, -Z	; get (Z) with pre-decrement
-	subi	tmp16a, -$03	; add 0x03
-	sbrc	tmp16a, 3	; if bit 3 not clear
-	st	Z, tmp16a	; 	store back
-	ld	tmp16a, Z	; get (Z)
-	subi	tmp16a, -$30	; add 0x30
-	sbrc	tmp16a, 7	; if bit 7 not clear
-	st	Z, tmp16a	; 	store back
-	cpi	ZL, AtBCD0	; done all three?
-	brne	bBCDx_3		; loop again if not
-	rjmp	bBCDx_1
-
-	.undef	tBCD0
-	.undef	tBCD1
-	.undef	tBCD2
-	.undef	fbinL
-	.undef	fbinH
-	.undef	cnt16a
-	.undef	tmp16a
-
-;----------------------------------------------------------------------------
-;
-;----------------------------------------------------------------------------
-
-; print a 16 bit number in r17:r16, here we have only 7bit numbers
-print_number:
-	call	bin2BCD16		; bcd number in r18:r17:r16
-	push	r16
-	mov	r16, r17
-	ldi	r17, 2			; we print a least two digits
-	andi	r16, 0x0f
-	breq	print_number_1
-	call	usart_write_nibble
-	inc	r17
-print_number_1:
-	pop	r16
-	call	usart_write_byte
-	mov	r16, r17
-	ret
-
-;----------------------------------------------------------------------------
-;
-;----------------------------------------------------------------------------
-
-midi_var_print:
-	push	r17			; the midi value
-	push	r16			; the midi address
-	call	usart_string		; print the midi parameter name
-	mov	r16,r17
-	call	usart_write_byte	; print the midi value as hexadecimal byte
-
-; print the midi address and value
-	ldi	zl, low( STR_MIDI_CC_1*2)
-	ldi	zh, high( STR_MIDI_CC_1*2)
-	call	usart_string
-
-	pop	r16			; get the midi address
-	clr	r17
-	call	print_number		; print 16 bit number in r17:r16
-	cpi	r17, 2
-	breq	midi_var_print_1
-
-	ldi	r16, ' '		; print trailing blank
-	call	usart_transmit
-
-midi_var_print_1:
-	ldi	zl, low( STR_MIDI_CC_2*2)
-	ldi	zh, high( STR_MIDI_CC_2*2)
-	call	usart_string
-
-	pop	r16			; get the midi value
-	lsr	r16
-	clr	r17
-	call	print_number		; print 16 bit number in r17:r16
-	ret
-
-;----------------------------------------------------------------------------
-;
-;----------------------------------------------------------------------------
-
-.MACRO print_string			;  <variable>
-	ldi	zl, low( @0*2)		; load z pointer
-	ldi	zh, high( @0*2)
-	call	usart_string
-.ENDMACRO
-
-.MACRO print_midi_var			;  <variable>
-	ldi	zl, low( STR_@0*2)	; load z pointer
-	ldi	zh, high( STR_@0*2)
-	ldi	r16, @0 - MIDICC	; the midi address
-	lds	r17, @0			; the midi value
-	call	midi_var_print
-.ENDMACRO
-
-.MACRO print_variable			;  <variable>
-	ldi	zl, low( STR_@0*2)	; load z pointer
-	ldi	zh, high( STR_@0*2)
-	call	usart_string
-	lds	r16, @0
-	call	usart_write_byte
-.ENDMACRO
-
-;-------------------------
-usart_print_sound_parameter:
-; lower knobs
-	print_string	STR_LINE
-	print_string	STR_LOWER
-
-	print_midi_var	RESONANCE
-	print_midi_var	CUTOFF
-	print_midi_var	LFOFREQ
-	print_midi_var	PANEL_LFOLEVEL
-	print_midi_var	VCFENVMOD
-	print_midi_var	PORTAMENTO
-	print_midi_var	PULSE_KNOB
-	print_midi_var	OSC_DETUNE
-
-; upper knobs
-	print_string	STR_NEXT_LINE
-	print_string	STR_UPPER
-
-	print_midi_var	KNOB_DCF_DECAY
-	print_midi_var	KNOB_DCF_ATTACK
-	print_midi_var	KNOB_AMP_DECAY
-	print_midi_var	KNOB_AMP_ATTACK
-
-; midi cc parameter
-	print_string	STR_NEXT_LINE
-	print_string	STR_MIDI_LINE
-
-	print_midi_var	ATTACKTIME2
-	print_midi_var	DECAYTIME2
-	print_midi_var	SUSTAINLEVEL2
-	print_midi_var	RELEASETIME2
-
-	call	usart_write_crlf
-	print_midi_var	ATTACKTIME
-	print_midi_var	DECAYTIME
-	print_midi_var	SUSTAINLEVEL
-	print_midi_var	RELEASETIME
-
-	call	usart_write_crlf
-	print_midi_var	LFO2FREQ
-	print_midi_var	PWMDEPTH
-	print_midi_var	FMDEPTH
-	print_midi_var	MIDI_KNOB_4
-	print_midi_var	MIDI_KNOB_5
-	print_midi_var	MIDI_KNOB_6
-	print_midi_var	MIXER_BALANCE
-	print_midi_var	MASTER_VOLUME
-
-; switches
-	print_string	STR_NEXT_LINE
-	print_string	STR_SWITCHES_LINE
-
-	print_variable	SW1
-	print_variable	SW2
-	print_variable	SW3
-	print_variable	SW4
-	call	usart_write_crlf
-
-; patch switches
-	print_variable	PATCH_SWITCH1
-	print_variable	PATCH_SWITCH2
-	print_variable	PATCH_SWITCH3
-	print_variable	PATCH_SWITCH4
-
-; varibales
-	print_string	STR_NEXT_LINE
-	print_string	STR_VAR_LINE
-
-	print_variable	DCOA_LEVEL
-	print_variable	DCOB_LEVEL
-	print_variable	LPF_I
-	print_variable	SCALED_RESONANCE
-.if USE_MASTER_VOLUME
-	print_variable	VOLUME
-	print_variable	VOLUME_X4
-.endif	; USE_MASTER_VOLUME
-	print_string	STR_NEXT_LINE
-	call	usart_write_crlf
-	ret
-
-;----------------------------------------------------------------------------
-; the strings
-
-STR_RESONANCE:		.db	0x0D, 0x0A, "RESONANCE        ", 0
-STR_CUTOFF:		.db	0x0D, 0x0A, "CUTOFF           ", 0
-STR_LFOFREQ:		.db	0x0D, 0x0A, "LFOFREQ          ", 0
-STR_PANEL_LFOLEVEL:	.db	0x0D, 0x0A, "LFOLEVEL         ", 0
-STR_VCFENVMOD:		.db	0x0D, 0x0A, "VCFENVMOD        ", 0
-STR_PORTAMENTO:		.db	0x0D, 0x0A, "PORTAMENTO       ", 0
-STR_PULSE_KNOB:		.db	0x0D, 0x0A, "PULSE_KNOB       ", 0
-STR_OSC_DETUNE:		.db	0x0D, 0x0A, "OSC_DETUNE       ", 0
-STR_KNOB_DCF_DECAY:	.db	0x0D, 0x0A, "FLT_DECAY        ", 0
-STR_KNOB_DCF_ATTACK:	.db	0x0D, 0x0A, "FLT_ATTACK       ", 0
-STR_KNOB_AMP_DECAY:	.db	0x0D, 0x0A, "AMP_DECAY        ", 0
-STR_KNOB_AMP_ATTACK:	.db	0x0D, 0x0A, "AMP_ATTACK       ", 0
-
-STR_ATTACKTIME2:	.db	0x0D, 0x0A, "DCF_ATTACKTIME   ", 0
-STR_DECAYTIME2:		.db	0x0D, 0x0A, "DCF_DECAYTIME    ", 0
-STR_SUSTAINLEVEL2:	.db	0x0D, 0x0A, "DCF_SUSTAINLEVEL ", 0
-STR_RELEASETIME2:	.db	0x0D, 0x0A, "DCF_RELEASETIME  ", 0
-STR_ATTACKTIME:		.db	0x0D, 0x0A, "DCA_ATTACKTIME   ", 0
-STR_DECAYTIME:		.db	0x0D, 0x0A, "DCA_DECAYTIME    ", 0
-STR_SUSTAINLEVEL:	.db	0x0D, 0x0A, "DCA_SUSTAINLEVEL ", 0
-STR_RELEASETIME:	.db	0x0D, 0x0A, "DCA_RELEASETIME  ", 0
-
-STR_LFO2FREQ:		.db	0x0D, 0x0A, "LFO2FREQ         ", 0
-STR_PWMDEPTH:		.db	0x0D, 0x0A, "PWMDEPTH         ", 0
-STR_FMDEPTH:		.db	0x0D, 0x0A, "FMDEPTH          ", 0
-STR_MIDI_KNOB_4:	.db	0x0D, 0x0A, "MIDI_KNOB_4      ", 0
-STR_MIDI_KNOB_5:	.db	0x0D, 0x0A, "MIDI_KNOB_5      ", 0
-STR_MIDI_KNOB_6:	.db	0x0D, 0x0A, "MIDI_KNOB_6      ", 0
-STR_MIXER_BALANCE:	.db	0x0D, 0x0A, "MIXER_BALANCE    ", 0
-STR_MASTER_VOLUME:	.db	0x0D, 0x0A, "MASTER_VOLUME    ", 0
-
-STR_SW1:		.db	0x0D, 0x0A, "SW1              ", 0
-STR_SW2:		.db	0x0D, 0x0A, "SW2              ", 0
-STR_SW3:		.db	0x0D, 0x0A, "SW3              ", 0
-STR_SW4:		.db	0x0D, 0x0A, "SW4              ", 0
-STR_PATCH_SWITCH1:	.db	0x0D, 0x0A, "PATCH_SWITCH1    ", 0
-STR_PATCH_SWITCH2:	.db	0x0D, 0x0A, "PATCH_SWITCH2    ", 0
-STR_PATCH_SWITCH3:	.db	0x0D, 0x0A, "PATCH_SWITCH3    ", 0
-STR_PATCH_SWITCH4:	.db	0x0D, 0x0A, "PATCH_SWITCH4    ", 0
-
-STR_DCOA_LEVEL:		.db	0x0D, 0x0A, "DCOA_LEVEL       ", 0
-STR_DCOB_LEVEL:		.db	0x0D, 0x0A, "DCOB_LEVEL       ", 0
-STR_SCALED_RESONANCE:	.db	0x0D, 0x0A, "SCLD_RESONANCE   ", 0
-STR_LPF_I:		.db	0x0D, 0x0A, "LPF_I            ", 0
-STR_VOLUME:		.db	0x0D, 0x0A, "VOLUME           ", 0
-STR_VOLUME_X4:		.db	0x0D, 0x0A, "VOLUME_X4        ", 0
-
-STR_NEXT_LINE:		.db	0x0D, 0x0A, 0, 0
-STR_LINE:		.db	0x0D, 0x0A, "-----------------------", 0
-STR_UPPER:		.db	0x0D, 0x0A, "----- upper knobs -----", 0
-STR_LOWER:		.db	0x0D, 0x0A, "----- lower knobs -----", 0
-STR_MIDI_LINE:		.db	0x0D, 0x0A, "----- midi control ----", 0
-STR_SWITCHES_LINE:	.db	0x0D, 0x0A, "----- switches --------", 0
-STR_VAR_LINE:		.db	0x0D, 0x0A, "----- variables -------", 0
-
-STR_MIDI_CC_1:		.db	"   CC", 0
-STR_MIDI_CC_2:		.db	" = ", 0
-
-;----------------------------------------------------------------------------
-;
-;----------------------------------------------------------------------------
-
-startup_message:
-	.db	0x0d, 0x0a, 0x0d, 0x0a
-	.db	"aweMeeblip-SE V3.01  (c) AWe 2012 ", 0x0d, 0x0a
-	.db	"   build ", __DATE__, " ", __TIME__, " ", 0x0d, 0x0a
-
-.if !USE_ORIGINAL_RAW_OSC		; 0: use switch for Ringmodulator enable, set SW_ANTI_ALIAS to 1
-	.db	"* remove raw waveform generators", 0x0d, 0x0a
-.endif	; !USE_ORIGINAL_RAW_OSC
-
-.if USE_RINGMODULATOR
-	.db	"* using ring modulator", 0x0d, 0x0a
-.endif	; USE_RINGMODULATOR
-
-	.db	0, 0			; end of string
-
-.endif	; USE_UART
+.endif	; USE_DEBUG_OUT
 
 ;----------------------------------------------------------------------------
 	.exit
